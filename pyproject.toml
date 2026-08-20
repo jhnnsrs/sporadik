@@ -1,0 +1,75 @@
+[project]
+name = "sporadik"
+version = "0.1.0"
+description = "a sparse array wire format: one axis made contiguous, written as a zarr prefix any object store can serve"
+authors = [{ name = "jhnnsrs", email = "jhnnsrs@gmail.com" }]
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+# Two dependencies, and that is the point. `sporadik` specifies a format and implements it; it
+# does not build anything, fetch anything or know what the numbers mean. numpy is the arrays and
+# zarr is the container -- there is nothing else a reference implementation of this needs.
+dependencies = [
+    "numpy>=1.26",
+    "zarr>=3.0",
+]
+
+[project.optional-dependencies]
+# `read_sparse` hands a whole rank-two layout back as a `scipy.sparse` matrix, which is the one
+# thing here that needs scipy. Reading slice by slice does not, and neither does writing: the
+# writer duck-types `.data`/`.indices`/`.indptr`/`.format`, so a scipy matrix works as input
+# without scipy being importable.
+scipy = ["scipy>=1.11"]
+# Writing into an object store rather than a directory. sporadik only ever hands zarr a store, so
+# this is for callers who want one instead of a path.
+obstore = ["obstore>=0.10"]
+complete = ["scipy>=1.11", "obstore>=0.10"]
+build = ["uv>=0.7.12"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "ruff>0.11",
+    "basedpyright>=1.21",
+    "scipy>=1.11",
+    # The interop claim is a test, not a memory: the suite asserts that at rank two a layout is
+    # read back by anndata itself, identically. Without this it would be an assertion about
+    # anndata that nothing ever ran.
+    "anndata>=0.10",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["sporadik"]
+
+[tool.hatch.build.targets.wheel]
+include = ["sporadik"]
+
+[tool.basedpyright]
+include = ["sporadik"]
+exclude = ["**/__pycache__", "tests"]
+typeCheckingMode = "strict"
+# zarr's group and array types differ across its 3.x line and the values that come back through
+# them are Unknown whatever sporadik annotates, so these four would report zarr's silence at every
+# call site here. Every other strict rule stays on.
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false
+reportMissingTypeStubs = false
+
+[tool.ruff.lint]
+extend-select = ["ANN", "D1"]
+
+[tool.ruff.lint.per-file-ignores]
+# A test's name and docstring say what it asserts; a `-> None` on every one of them is noise that
+# makes the suite harder to read, which is the opposite of what the rule is for.
+"tests/*" = ["ANN001", "ANN201", "ANN202", "ANN206"]
+
+[tool.ruff]
+exclude = [".git", ".ruff_cache", ".venv", "__pypackages__", "_build", "build", "dist"]
+line-length = 100
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
