@@ -1,6 +1,6 @@
 [project]
 name = "sporadik"
-version = "0.1.0"
+version = "1.0.0"
 description = "a sparse array wire format: one axis made contiguous, written as a zarr prefix any object store can serve"
 authors = [{ name = "jhnnsrs", email = "jhnnsrs@gmail.com" }]
 requires-python = ">=3.11"
