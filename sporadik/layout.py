@@ -18,10 +18,12 @@ One invariant holds at every rank and is the spine of the format::
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from sporadik.errors import LayoutError
 from sporadik.spec import ENCODINGS, MIN_RANK, anndata_encoding, layout_path, raveled_shape
@@ -43,9 +45,9 @@ class Layout:
     every value in a different cell, which is why it is stated and checked rather than assumed.
     """
 
-    data: np.ndarray
-    indices: np.ndarray
-    indptr: np.ndarray
+    data: npt.NDArray[Any]
+    indices: npt.NDArray[Any]
+    indptr: npt.NDArray[Any]
     shape: tuple[int, ...]
     indexed_axis: int
     index_order: tuple[int, ...]
@@ -71,7 +73,7 @@ class Layout:
         return layout_path(self.indexed_axis)
 
 
-def validate_layout(*, data: np.ndarray, indices: np.ndarray, indptr: np.ndarray, shape: Sequence[int], indexed_axis: int) -> None:
+def validate_layout(*, data: npt.NDArray[Any], indices: npt.NDArray[Any], indptr: npt.NDArray[Any], shape: Sequence[int], indexed_axis: int) -> None:
     """Refuse arrays that contradict what they declare, before anything is written.
 
     A reader checks all of this too, and has to -- but it checks it *after* the bytes have moved,
@@ -97,9 +99,9 @@ def layout_over(
     shape: Sequence[int],
     indexed_axis: int,
     *,
-    data: np.ndarray,
-    indices: np.ndarray,
-    indptr: np.ndarray,
+    data: npt.NDArray[Any],
+    indices: npt.NDArray[Any],
+    indptr: npt.NDArray[Any],
     index_order: Sequence[int] | None = None,
 ) -> Layout:
     """A :class:`Layout` at any rank, from the three arrays and the axis they compress.

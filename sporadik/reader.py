@@ -17,19 +17,38 @@ permutation reads a different cell every time.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import zarr
 
 from sporadik.errors import IncompleteError, LayoutError, SpecError, SporadikError
 from sporadik.layout import MatrixLike
-from sporadik.spec import BLOCK_KEY, MIN_RANK, SUPPORTED_SPECS, anndata_encoding, layout_path, raveled_shape
+from sporadik.spec import (
+    BLOCK_KEY,
+    MIN_RANK,
+    SUPPORTED_SPECS,
+    anndata_encoding,
+    layout_path,
+    raveled_shape,
+)
 
-__all__ = ["SparseReader", "SliceInfo", "StoreInfo", "describe", "open_store", "read_layout"]
+__all__ = ["SliceInfo", "SparseReader", "StoreInfo", "describe", "open_store", "read_layout"]
+
+#: An open zarr node -- a group or an array. `Any` on purpose: sporadik only ever calls the few
+#: methods the two share, and zarr's 3.x line types them differently enough that annotating the
+#: union precisely would be describing zarr's version history rather than this format.
+ZarrNode = Any
+
+
+def _open(path: Path | str) -> ZarrNode:
+    """The root group of a store, as a node this module can index without narrowing at each step."""
+    return zarr.open_group(str(Path(path)), mode="r")
 
 
 @dataclass(frozen=True)
@@ -92,7 +111,7 @@ class StoreInfo:
         return self.layouts.get(int(axis))
 
 
-def _is_byte_addressable(array: Any) -> bool:  # noqa: ANN401 - an open zarr array
+def _is_byte_addressable(array: ZarrNode) -> bool:
     """Whether this array's stored object is the raw buffer, so a byte range reads elements.
 
     One chunk and no compressor. Both halves matter: a compressor makes an offset meaningless, and
@@ -101,7 +120,7 @@ def _is_byte_addressable(array: Any) -> bool:  # noqa: ANN401 - an open zarr arr
     return not array.compressors and tuple(array.chunks) == tuple(array.shape)
 
 
-def _describe_layout(group: Any, entry: dict, shape: tuple[int, ...]) -> SliceInfo:  # noqa: ANN401 - an open zarr group
+def _describe_layout(group: ZarrNode, entry: dict[str, Any], shape: tuple[int, ...]) -> SliceInfo:
     """Read one layout, refusing anything that contradicts itself or the store around it."""
     path = str(entry.get("path"))
     indexed_axis = entry.get("indexed_axis")
@@ -178,7 +197,7 @@ def describe(path: Path | str) -> StoreInfo:
     which reads back the right *count* of values, every one of them zero, and raises nothing at all.
     """
     path = Path(path)
-    group = zarr.open_group(str(path), mode="r")
+    group = _open(path)
     block = dict(group.attrs).get(BLOCK_KEY)
 
     if not isinstance(block, dict):
@@ -236,7 +255,7 @@ class SparseReader:
         self.path = Path(path)
         self.store = describe(self.path)
         self.info = self._pick(layout)
-        self._group = zarr.open_group(str(self.path), mode="r")[self.info.path]
+        self._group: ZarrNode = _open(self.path)[self.info.path]
         #: `indptr` is cached only when it cannot be byte-addressed. A byte-addressable store is the
         #: point of that variant: an object-major layout over 5.4 M positions has a ~22 MB `indptr`,
         #: and reading two entries out of it should cost 16 bytes. When the layout is chunked there
@@ -260,7 +279,7 @@ class SparseReader:
             )
         return next(iter(self.store.layouts.values()))
 
-    def _read_range(self, name: str, start: int, stop: int) -> np.ndarray:
+    def _read_range(self, name: str, start: int, stop: int) -> npt.NDArray[Any]:
         """Elements ``[start:stop)`` of one array, fetching only their bytes.
 
         Goes to the store's own range API -- a seek locally, an HTTP Range GET against S3 -- rather
@@ -300,7 +319,7 @@ class SparseReader:
         edges = self._read_range("indptr", position, position + 2)
         return int(edges[0]), int(edges[1])
 
-    def slice_at(self, position: int) -> tuple[np.ndarray, np.ndarray]:
+    def slice_at(self, position: int) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
         """The raveled positions and values of one slice along the compressed axis.
 
         The positions index the *other* axes raveled together, in ``index_order``. At rank two that
@@ -311,7 +330,7 @@ class SparseReader:
             return self._read_range("indices", low, high), self._read_range("data", low, high)
         return self._group["indices"][low:high], self._group["data"][low:high]
 
-    def coords_at(self, position: int) -> tuple[tuple[np.ndarray, ...], np.ndarray]:
+    def coords_at(self, position: int) -> tuple[tuple[npt.NDArray[Any], ...], npt.NDArray[Any]]:
         """One slice as one coordinate array per uncompressed axis, plus the values.
 
         The *i*-th array is the coordinate along ``info.index_order[i]``, not along axis *i*. At
@@ -321,14 +340,14 @@ class SparseReader:
         raveled, values = self.slice_at(position)
         return np.unravel_index(np.asarray(raveled), self.info.index_shape), values
 
-    def dense_slice(self, position: int) -> np.ndarray:
+    def dense_slice(self, position: int) -> npt.NDArray[Any]:
         """One slice scattered into a dense array over the uncompressed axes."""
         raveled, values = self.slice_at(position)
         dense = np.zeros(self.info.index_shape, dtype=values.dtype).reshape(-1)
         dense[np.asarray(raveled)] = values
         return dense.reshape(self.info.index_shape)
 
-    def maxima(self) -> np.ndarray:
+    def maxima(self) -> npt.NDArray[Any]:
         """The largest absolute value of every slice, in one pass.
 
         The one method here that is *not* a range read and cannot be: it reduces over every value,
@@ -350,7 +369,7 @@ class SparseReader:
 
 
 @contextmanager
-def open_store(path: Path | str, layout: int | None = None) -> Iterator[SparseReader]:
+def open_store(path: Path | str, layout: int | None = None) -> Generator[SparseReader]:
     """A :class:`SparseReader` over one layout of ``path``, closed on the way out."""
     reader = SparseReader(path, layout)
     try:
@@ -381,6 +400,6 @@ def read_layout(path: Path | str, layout: int | None = None) -> MatrixLike:
             f"{path} is a rank-{info.rank} array, and `scipy.sparse` has no rank-{info.rank} matrix to return. Read it "
             "a slice at a time with open_store(), which unravels the positions for you."
         )
-    group = zarr.open_group(str(Path(path)), mode="r")[info.path]
+    group = _open(path)[info.path]
     builder = sp.csr_matrix if info.encoding == "csr_matrix" else sp.csc_matrix
     return builder((group["data"][:], group["indices"][:], group["indptr"][:]), shape=info.shape)

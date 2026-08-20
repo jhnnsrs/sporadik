@@ -73,7 +73,13 @@ from sporadik.spec import (
     layout_path,
     raveled_shape,
 )
-from sporadik.writer import DEFAULT_CHUNK, TARGET_CHUNK_BYTES, chunk_for, write_store, write_store_into
+from sporadik.writer import (
+    DEFAULT_CHUNK,
+    TARGET_CHUNK_BYTES,
+    chunk_for,
+    write_store,
+    write_store_into,
+)
 
 __all__ = [
     "BLOCK_KEY",
