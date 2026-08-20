@@ -1,0 +1,26 @@
+name: Typecheck
+
+on:
+  push:
+    branches: [main, next, "[0-9]+.x"]
+  pull_request:
+    branches: [main, next, "[0-9]+.x"]
+
+jobs:
+  basedpyright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and set Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          python-version: "3.12"
+
+      - name: Install the project
+        run: uv sync --all-extras --dev
+
+      # Enforcing rather than advisory: the package typechecks clean today.
+      - name: basedpyright
+        run: uv run basedpyright

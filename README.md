@@ -4,7 +4,7 @@
 written last that says which children the writer finished.
 
 It is strictly a *format*: no network, no client, no storage opinions, and no idea what the numbers
-mean. Two dependencies — numpy and zarr — and that is the whole of it.
+mean. Two dependencies is the whole of it.
 
 It defines no container of its own. A layout is anndata's spelling, so at rank two the three arrays
 are **byte-identical** to what `scanpy` writes and a browser reads one with `zarrita`'s `open` and

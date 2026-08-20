@@ -6,9 +6,6 @@ authors = [{ name = "jhnnsrs", email = "jhnnsrs@gmail.com" }]
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"
-# Two dependencies, and that is the point. `sporadik` specifies a format and implements it; it
-# does not build anything, fetch anything or know what the numbers mean. numpy is the arrays and
-# zarr is the container -- there is nothing else a reference implementation of this needs.
 dependencies = [
     "numpy>=1.26",
     "zarr>=3.0",
@@ -32,6 +29,7 @@ dev-dependencies = [
     "pytest-cov>=6.1.1",
     "ruff>0.11",
     "basedpyright>=1.21",
+    "python-semantic-release>=9.21.0",
     "scipy>=1.11",
     # The interop claim is a test, not a memory: the suite asserts that at rank two a layout is
     # read back by anndata itself, identically. Without this it would be an assertion about
@@ -64,11 +62,53 @@ extend-select = ["ANN", "D1"]
 [tool.ruff.lint.per-file-ignores]
 # A test's name and docstring say what it asserts; a `-> None` on every one of them is noise that
 # makes the suite harder to read, which is the opposite of what the rule is for.
-"tests/*" = ["ANN001", "ANN201", "ANN202", "ANN206"]
+"tests/*" = ["ANN001", "ANN201", "ANN202", "ANN206", "ANN401"]
 
 [tool.ruff]
 exclude = [".git", ".ruff_cache", ".venv", "__pypackages__", "_build", "build", "dist"]
 line-length = 100
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+# The semantic-release GitHub Action runs in a Docker container without uv, so install it first
+# (the `build` extra). After PSR bumps the version in pyproject.toml, re-sync just this package's
+# entry in uv.lock and stage it so the release commit carries a consistent lock. $PACKAGE_NAME is
+# injected by PSR.
+build_command = """
+    python -m pip install -e '.[build]'
+    uv lock --upgrade-package "$PACKAGE_NAME"
+    git add uv.lock
+    uv build
+"""
+commit_message = "chore(release): v{version} [skip ci]"
+
+# main -> stable X.Y.Z. next -> prereleases X.Y.Z-rc.N. N.x -> maintenance.
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.branches.next]
+match = "next"
+prerelease = true
+prerelease_token = "rc"
+
+# Maintenance branches (1.x, 2.x, ...) cut stable patch/minor releases for an older major after a
+# new major has shipped from main.
+[tool.semantic_release.branches.maintenance]
+match = '^\d+\.x$'
+prerelease = false
+
+# Keep the changelog focused on user-facing changes. These patterns only filter what is rendered --
+# they do not affect version bumps.
+[tool.semantic_release.changelog]
+exclude_commit_patterns = [
+    '^chore(?:\([^)]*\))?: ',
+    '^ci(?:\([^)]*\))?: ',
+    '^build(?:\([^)]*\))?: ',
+    '^style(?:\([^)]*\))?: ',
+    '^test(?:\([^)]*\))?: ',
+    '^Merge ',
+]
 
 [build-system]
 requires = ["hatchling"]

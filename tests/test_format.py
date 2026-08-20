@@ -349,9 +349,8 @@ def test_maxima_matches_a_dense_reduction(both: Path, matrix: Any) -> None:
 
 def test_a_position_off_the_end_is_an_index_error(both: Path) -> None:
     """Named against the indexed axis, since that is the one the reader is talking about."""
-    with open_store(both, 1) as reader:
-        with pytest.raises(IndexError, match=f"{COLS} slices"):
-            reader.slice_at(COLS)
+    with open_store(both, 1) as reader, pytest.raises(IndexError, match=f"{COLS} slices"):
+        reader.slice_at(COLS)
 
 
 def test_reading_a_layout_the_store_does_not_hold_is_refused(tmp_path: Path, matrix: Any) -> None:

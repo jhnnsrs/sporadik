@@ -16,7 +16,6 @@ interrupted upload, indistinguishable from success.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import zarr
@@ -67,7 +66,7 @@ def write_store(path: Path | str, matrices: MatrixLike, *, chunk: int | None = N
     return Path(path)
 
 
-def write_store_into(group: Any, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False) -> Any:  # noqa: ANN401 - an open zarr group, typed differently across zarr's 3.x line
+def write_store_into(group: MatrixLike, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False) -> MatrixLike:
     """Write the layouts into an already-opened zarr group, and return it.
 
     Split from :func:`write_store` so the same bytes can be written to a local directory or straight
