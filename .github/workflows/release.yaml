@@ -2,7 +2,7 @@ name: Release with uv and semantic-release
 
 on:
   push:
-    branches: [main, next, "*.x"] # main: stable, next: prereleases, N.x: maintenance
+    branches: [main, next, "[0-9]+.x"] # main: stable, next: prereleases, N.x: maintenance
 
 # Needed so semantic-release can push the version-bump commit + tag and create
 # the GitHub Release. id-token is for PyPI trusted publishing via `uv publish`.

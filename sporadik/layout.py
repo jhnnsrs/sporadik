@@ -18,7 +18,7 @@ One invariant holds at every rank and is the spine of the format::
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,14 +28,14 @@ import numpy.typing as npt
 from sporadik.errors import LayoutError
 from sporadik.spec import ENCODINGS, MIN_RANK, anndata_encoding, layout_path, raveled_shape
 
-__all__ = ["Layout", "layout_of", "layout_over", "layouts_of", "validate_layout"]
+__all__ = ["Layout", "MatrixLike", "layout_of", "layout_over", "layouts_of", "maxima_of", "validate_layout"]
 
 #: Anything three arrays and a shape can be read out of: a `scipy.sparse` CSR or CSC matrix, or a
 #: :class:`Layout` built from the arrays directly. Duck-typed, so `scipy` need not be importable.
 MatrixLike = Any
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Layout:
     """The three arrays, the array's own shape, and which axis they make contiguous.
 
@@ -51,6 +51,30 @@ class Layout:
     shape: tuple[int, ...]
     indexed_axis: int
     index_order: tuple[int, ...]
+
+    def __eq__(self, other: object) -> bool:
+        """Same axis, same shape, same three arrays -- compared by value, not by identity.
+
+        Written out rather than left to the dataclass, which compares the fields as a tuple and so
+        compares three numpy arrays with ``==``: that returns an array, and the tuple comparison
+        then asks it for a truth value and raises. A layout that cannot be compared cannot be
+        asserted about, and `layout == read_back` is the first thing anyone writes.
+        """
+        if not isinstance(other, Layout):
+            return NotImplemented
+        return (
+            self.shape == other.shape
+            and self.indexed_axis == other.indexed_axis
+            and self.index_order == other.index_order
+            and np.array_equal(self.data, other.data)
+            and np.array_equal(self.indices, other.indices)
+            and np.array_equal(self.indptr, other.indptr)
+        )
+
+    #: Unhashable, and deliberately. Equality here is over megabytes of array, so a hash consistent
+    #: with it would have to read all of them; `frozen=True` otherwise generates one that raises on
+    #: the arrays anyway, which is the same answer given less clearly.
+    __hash__ = None  # pyright: ignore[reportAssignmentType]
 
     @property
     def rank(self) -> int:
@@ -73,7 +97,33 @@ class Layout:
         return layout_path(self.indexed_axis)
 
 
-def validate_layout(*, data: npt.NDArray[Any], indices: npt.NDArray[Any], indptr: npt.NDArray[Any], shape: Sequence[int], indexed_axis: int) -> None:
+def maxima_of(data: npt.NDArray[Any], indptr: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """The largest absolute value of every slice, from the values and the runs that name them.
+
+    Here, rather than in the reader or the writer, because **both** need it and they must not
+    disagree: the writer stores the answer so a reader never has to reduce over every value, and the
+    reader still computes it for a store written before that existed. One definition, so the stored
+    answer and the fallback cannot drift into two different numbers.
+
+    An empty run is zero, not the identity of `maximum` -- `reduceat` hands back the element at the
+    start index for a run of length zero, which is the *next* slice's first value.
+    """
+    edges = np.asarray(indptr)
+    out = np.zeros(max(len(edges) - 1, 0), dtype=np.asarray(data).dtype)
+    if np.asarray(data).size:
+        np.maximum.reduceat(np.abs(np.asarray(data)), edges[:-1], out=out)
+    out[np.diff(edges) == 0] = 0
+    return out
+
+
+def validate_layout(
+    *,
+    data: npt.NDArray[Any],
+    indices: npt.NDArray[Any],
+    indptr: npt.NDArray[Any],
+    shape: Sequence[int],
+    indexed_axis: int,
+) -> None:
     """Refuse arrays that contradict what they declare, before anything is written.
 
     A reader checks all of this too, and has to -- but it checks it *after* the bytes have moved,
@@ -165,8 +215,21 @@ def layouts_of(matrices: MatrixLike) -> dict[int, Layout]:
     meaningless: two layouts compressing the same axis, which is one capability twice with nothing
     to say which a reader should use, and two different shapes, which is two arrays and therefore
     two stores.
+
+    Anything already *holding* a set of layouts -- a :class:`sporadik.SparseArray`, or any object
+    exposing them the same way -- has them taken out and put through the same refusals as a list
+    would be, so the key each ends up under is the axis it actually compresses rather than the one
+    it was filed under. Duck-typed rather than checked against the class, so this module keeps
+    importing nothing above it and a caller can hand over an object of its own.
     """
-    candidates = matrices if isinstance(matrices, (list, tuple)) else [matrices]
+    held = getattr(matrices, "layouts", None)
+    # `Mapping`, not `dict`: a holder that protects its own invariants hands back a read-only view
+    # rather than the mutable original, and a check against `dict` would refuse exactly the objects
+    # that are most careful about what they hold.
+    if isinstance(held, Mapping) and all(isinstance(layout, Layout) for layout in held.values()):
+        candidates = list(held.values())
+    else:
+        candidates = matrices if isinstance(matrices, (list, tuple)) else [matrices]
     if not candidates:
         raise LayoutError("A sparse store is its layouts; there is no state in which one exists and holds none.")
 

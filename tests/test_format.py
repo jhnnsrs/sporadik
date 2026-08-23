@@ -133,7 +133,9 @@ def test_every_array_is_chunked_at_the_request_granularity(both: Path, matrix: A
         assert info.chunks[name] == chunk_for(np.dtype(np.float32) if name == "data" else np.int32, info.chunks[name])
 
     blobs = [p for p in (both / LAYOUTS_GROUP / "axis1" / "data").rglob("*") if p.is_file() and p.name != "zarr.json"]
-    assert sum(p.stat().st_size for p in blobs) < matrix.data.nbytes, "compressed, because a request pays for bytes but not per byte"
+    assert sum(p.stat().st_size for p in blobs) < matrix.data.nbytes, (
+        "compressed, because a request pays for bytes but not per byte"
+    )
 
 
 def test_a_byte_addressable_store_reads_only_its_own_bytes(tmp_path: Path, matrix: Any) -> None:
@@ -227,9 +229,17 @@ def test_a_coo_matrix_says_how_to_fix_it(matrix: Any) -> None:
         ({"indices": np.arange(3)}, "parallel"),
     ],
 )
-def test_validate_sparse_refuses_arrays_that_contradict_the_declaration(matrix: Any, changes: dict, expected: str) -> None:
+def test_validate_sparse_refuses_arrays_that_contradict_the_declaration(
+    matrix: Any, changes: dict, expected: str
+) -> None:
     """Checked before the upload, because the server's copy of this check costs a round trip."""
-    fields = {"data": matrix.data, "indices": matrix.indices, "indptr": matrix.indptr, "shape": matrix.shape, "indexed_axis": 1}
+    fields = {
+        "data": matrix.data,
+        "indices": matrix.indices,
+        "indptr": matrix.indptr,
+        "shape": matrix.shape,
+        "indexed_axis": 1,
+    }
     with pytest.raises(ValueError, match=expected):
         validate_layout(**{**fields, **changes})
 
@@ -401,7 +411,9 @@ def _layout_from_dense(dense: np.ndarray, indexed_axis: int) -> Any:
     """
     order = tuple(axis for axis in range(dense.ndim) if axis != indexed_axis)
     flat = sp.csr_matrix(np.transpose(dense, (indexed_axis, *order)).reshape(dense.shape[indexed_axis], -1))
-    return layout_over(dense.shape, indexed_axis, data=flat.data, indices=flat.indices, indptr=flat.indptr, index_order=order)
+    return layout_over(
+        dense.shape, indexed_axis, data=flat.data, indices=flat.indices, indptr=flat.indptr, index_order=order
+    )
 
 
 @pytest.fixture
@@ -490,3 +502,322 @@ def test_more_layouts_than_axes_is_refused(cube_store: Path) -> None:
     _rewrite_block(cube_store, layouts=[*block["layouts"], dict(block["layouts"][0])])
     with pytest.raises(ValueError, match="rank-3 array"):
         describe(cube_store)
+
+
+# --------------------------------------------------------------------------- #
+# Reading many slices
+#
+# The claim these make is not "the values are right" -- `slice_at` already had that -- it is **how
+# many times we waited for them**. A format whose whole justification is one contiguous range read
+# was offering one position at a time, and handing zarr's plural `get_partial_values` a list of
+# exactly one, three times, to read a single slice. So the cost tests count *calls*, and they count
+# them at the store, which is the only place the claim is real.
+#
+# The two write modes are counted through different hooks, and that is not an accident of the test:
+# they are different mechanisms. A byte-addressable store issues range reads through
+# `get_partial_values`; a chunked one goes through zarr's indexing to `store.get`, once per chunk,
+# and makes **zero** `get_partial_values` calls. A cost test pointed at the wrong hook sees zero of
+# everything and passes no matter what the code does.
+# --------------------------------------------------------------------------- #
+
+
+def _count_range_calls(reader: SparseReader) -> tuple[list[list[int]], Any]:
+    """Record one entry per `get_partial_values` call, holding that call's range sizes."""
+    store = reader._group["data"].store_path.store
+    original = store.get_partial_values
+    calls: list[list[int]] = []
+
+    async def counting(prototype: Any, key_ranges: Any) -> Any:
+        pairs = list(key_ranges)
+        calls.append([getattr(request, "end", 0) - getattr(request, "start", 0) for _, request in pairs])
+        return await original(prototype, pairs)
+
+    store.get_partial_values = counting
+    return calls, lambda: setattr(store, "get_partial_values", original)
+
+
+def _count_chunk_gets(reader: SparseReader) -> tuple[list[str], Any]:
+    """Record every chunk object a chunked store is asked for, by key."""
+    store = reader._group["data"].store_path.store
+    original = store.get
+    keys: list[str] = []
+
+    async def counting(key: str, *args: Any, **kwargs: Any) -> Any:
+        keys.append(key)
+        return await original(key, *args, **kwargs)
+
+    store.get = counting
+    return keys, lambda: setattr(store, "get", original)
+
+
+@pytest.fixture
+def exact(tmp_path: Path, matrix: Any) -> Path:
+    """Both layouts, written byte-addressably -- the variant whose reads are range reads."""
+    return write_store(tmp_path / "exact.zarr", [matrix, matrix.tocsr()], byte_addressable=True)
+
+
+def test_one_slice_costs_two_round_trips_rather_than_three(exact: Path) -> None:
+    """`indices` and `data` are the same range over sibling arrays, so they are one request.
+
+    Three waves was never a property of the format -- `indptr` genuinely has to answer before there
+    is a run to ask for, but the two arrays of that run do not have to answer one after the other.
+    """
+    reader = SparseReader(exact, 1)
+    calls, restore = _count_range_calls(reader)
+    try:
+        reader.slice_at(7)
+    finally:
+        restore()
+    assert len(calls) == 2, f"one slice took {len(calls)} waves"
+    assert len(calls[0]) == 1, "the first wave is the indptr bracket"
+    assert len(calls[1]) == 2, "the second wave is indices and data together"
+
+
+def test_a_scattered_batch_costs_two_round_trips_whatever_its_size(exact: Path) -> None:
+    """The headline: the number of waves does not depend on how many slices were asked for."""
+    reader = SparseReader(exact, 1)
+    for count in (3, 20, 60):
+        calls, restore = _count_range_calls(reader)
+        try:
+            reader.slices_at(np.linspace(0, reader.info.slices - 1, count, dtype=int))
+        finally:
+            restore()
+        assert len(calls) == 2, f"{count} slices took {len(calls)} waves"
+
+
+def test_a_contiguous_range_of_slices_is_one_range_read(exact: Path) -> None:
+    """Contiguous positions are already one byte range, so nothing is coalesced and none over-read."""
+    reader = SparseReader(exact, 1)
+    calls, restore = _count_range_calls(reader)
+    try:
+        selection = reader.slices_over(10, 40)
+    finally:
+        restore()
+    assert len(calls) == 2
+    assert len(calls[0]) == 1, "overlapping indptr windows fold into one range"
+    assert len(calls[1]) == 2, "one indices range and one data range, not one pair per slice"
+    low, _ = reader.bounds_at(10)
+    _, high = reader.bounds_at(39)
+    assert calls[1][0] == (high - low) * reader._group["indices"].dtype.itemsize
+    assert selection.nnz == high - low
+
+
+def test_a_batch_on_a_chunked_store_fetches_each_chunk_once(both: Path) -> None:
+    """The chunked variant's win is the other one: a chunk two runs share is fetched once, not twice."""
+    reader = SparseReader(both, 1)
+    positions = list(range(0, reader.info.slices, 3))
+
+    keys, restore = _count_chunk_gets(reader)
+    try:
+        reader.slices_at(positions)
+    finally:
+        restore()
+    batched = list(keys)
+
+    keys, restore = _count_chunk_gets(reader)
+    try:
+        for position in positions:
+            reader.slice_at(position)
+    finally:
+        restore()
+    one_at_a_time = list(keys)
+
+    assert len(batched) == len(set(batched)), "a batch fetched some chunk twice"
+    assert len(batched) < len(one_at_a_time)
+
+
+def test_a_batch_of_one_costs_what_a_single_slice_costs(both: Path, exact: Path) -> None:
+    """The one-run dispatch, pinned.
+
+    Without it a batch of one is a fancy index over a contiguous run -- an eight-byte offset per
+    nonzero to read what a plain slice reads directly -- and `slices_at([p])` would be *slower* than
+    the `slice_at(p)` it is meant to replace.
+    """
+    chunked = SparseReader(both, 1)
+    keys, restore = _count_chunk_gets(chunked)
+    try:
+        chunked.slices_at([5])
+        batched = len(keys)
+        keys.clear()
+        chunked.slice_at(5)
+    finally:
+        restore()
+    assert batched == len(keys)
+
+    ranged = SparseReader(exact, 1)
+    calls, restore = _count_range_calls(ranged)
+    try:
+        ranged.slices_at([5])
+        batch_ranges = [list(call) for call in calls]
+        calls.clear()
+        ranged.slice_at(5)
+        single_ranges = [list(call) for call in calls]
+    finally:
+        restore()
+    assert batch_ranges == single_ranges
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_batched_and_one_at_a_time_read_the_same_values(both: Path, exact: Path, axis: int) -> None:
+    """However few times we waited, the bytes are the ones reading them singly would have given."""
+    for path in (both, exact):
+        reader = SparseReader(path, axis)
+        positions = np.array([4, 1, 4, 0, 9, 2])
+        selection = reader.slices_at(positions)
+        for place, position in enumerate(positions):
+            wanted_indices, wanted_values = reader.slice_at(int(position))
+            got_indices, got_values = selection.slice_at(place)
+            assert np.array_equal(got_indices, wanted_indices)
+            assert np.array_equal(got_values, wanted_values)
+
+
+def test_slices_come_back_in_the_order_they_were_asked_for(both: Path) -> None:
+    """Sorted is the order the bytes are *fetched* in; it is never the order they are returned in."""
+    reader = SparseReader(both, 1)
+    descending = np.arange(12)[::-1]
+    selection = reader.slices_at(descending)
+    assert np.array_equal(selection.positions, descending)
+    for place, position in enumerate(descending):
+        assert np.array_equal(selection.slice_at(place)[1], reader.slice_at(int(position))[1])
+
+
+def test_a_repeated_position_is_read_once_and_returned_twice(exact: Path) -> None:
+    """A batch of ids from a join legitimately repeats, so repeats are answered rather than refused."""
+    reader = SparseReader(exact, 1)
+    calls, restore = _count_range_calls(reader)
+    try:
+        selection = reader.slices_at([3, 3, 3])
+    finally:
+        restore()
+    assert len(selection) == 3
+    assert len(calls[1]) == 2, "one run fetched, not three"
+    first = selection.slice_at(0)
+    for place in (1, 2):
+        assert np.array_equal(selection.slice_at(place)[1], first[1])
+
+
+def test_an_empty_selection_is_a_selection_over_no_slices(both: Path) -> None:
+    """What an empty filter returns, rather than a refusal of it."""
+    selection = SparseReader(both, 1).slices_at([])
+    assert len(selection) == 0
+    assert selection.nnz == 0
+    assert np.array_equal(selection.indptr, np.array([0]))
+
+
+def test_a_position_off_the_end_is_an_index_error_in_a_batch_too(both: Path) -> None:
+    """The same refusal as the scalar case, in the same words."""
+    reader = SparseReader(both, 1)
+    with pytest.raises(IndexError, match="not a position along axis 1"):
+        reader.slices_at([0, reader.info.slices])
+
+
+def test_a_selection_unravels_to_coordinates_in_the_original_frame(both: Path, matrix: Any) -> None:
+    """Row *i* is ``positions[i]``, and `coords` is what says so.
+
+    This is the trap the type exists for: a caller who reads a coordinate straight off the
+    selection's own `indptr` gets a real, wrong one.
+    """
+    reader = SparseReader(both, 1)
+    positions = np.array([7, 2, 7])
+    (coords, values) = reader.slices_at(positions).coords()
+    assert set(np.unique(coords[1]).tolist()) <= {2, 7}
+    dense = matrix.toarray()
+    assert np.allclose(dense[coords[0], coords[1]], values)
+
+
+def test_a_selection_can_be_written_as_a_store_of_its_own(tmp_path: Path, both: Path, matrix: Any) -> None:
+    """`as_layout` is the caller saying the selection *is* the array now -- and then it writes."""
+    selection = SparseReader(both, 1).slices_over(10, 40)
+    written = write_store(tmp_path / "subset.zarr", selection.as_layout())
+    assert describe(written).shape == (matrix.shape[0], 30)
+    assert np.allclose(read_layout(written, 1).toarray(), matrix.tocsc()[:, 10:40].toarray())
+
+
+def test_dense_slices_is_dense_slice_stacked(both: Path) -> None:
+    """The batch shape a caller feeding a model wants, and the same numbers as one at a time."""
+    reader = SparseReader(both, 1)
+    positions = [5, 1, 5]
+    assert np.allclose(
+        reader.dense_slices(positions), np.stack([reader.dense_slice(position) for position in positions])
+    )
+
+
+def test_reading_inside_an_event_loop_says_to_use_a_worker_thread(exact: Path) -> None:
+    """The stance was always "read in a worker thread"; the code never said it.
+
+    Inside a running loop `asyncio.run` raised asyncio's own error about asyncio, naming neither
+    this package nor the way out of it.
+    """
+    import asyncio
+
+    from sporadik import SporadikError
+
+    reader = SparseReader(exact, 1)
+
+    async def read() -> Any:
+        return reader.slice_at(7)
+
+    with pytest.raises(SporadikError, match="to_thread"):
+        asyncio.run(read())
+
+
+def test_reading_from_a_worker_thread_inside_an_event_loop_works(exact: Path) -> None:
+    """The advice in that message, asserted rather than remembered."""
+    import asyncio
+
+    reader = SparseReader(exact, 1)
+
+    async def read() -> Any:
+        return await asyncio.to_thread(reader.slices_at, [7, 8])
+
+    selection = asyncio.run(read())
+    assert len(selection) == 2
+
+
+def test_stored_maxima_match_the_reduction_they_replace(both: Path, matrix: Any) -> None:
+    """The writer now does what this module's own advice always said to do at ingest."""
+    reader = SparseReader(both, 1)
+    assert describe(both).layouts[1].has_maxima
+    assert np.allclose(reader.maxima(), np.abs(matrix.toarray()).max(axis=0))
+
+
+def test_a_store_written_without_maxima_still_reads(tmp_path: Path, both: Path) -> None:
+    """The array is additive, so a store written before it existed is still a legal store.
+
+    Which is why nothing announces it in the block: `describe` looks up the three names it needs and
+    never enumerates a layout group for unknown children, so the spec version does not move and a
+    reader that predates this ignores the extra array rather than refusing the store.
+    """
+    import shutil
+
+    legacy = tmp_path / "legacy.zarr"
+    shutil.copytree(both, legacy)
+    for axis in (0, 1):
+        shutil.rmtree(legacy / LAYOUTS_GROUP / f"axis{axis}" / "maxima")
+
+    assert describe(legacy).spec == SPEC_VERSION
+    assert not describe(legacy).layouts[1].has_maxima
+    assert np.allclose(SparseReader(legacy, 1).maxima(), SparseReader(both, 1).maxima())
+
+
+def test_the_block_says_nothing_about_maxima(both: Path) -> None:
+    """A derived fact is read off the artifact, never declared -- as `range_readable` already is.
+
+    Stated as a test because the alternative was tempting and would have been a spec change:
+    announcing the array in the block changes `block_for`'s output for *every* store, including the
+    ones that do not carry it, and `tests/test_spec_document.py` asserts that output against the
+    README.
+    """
+    block = _block(both)
+    assert "maxima" not in json.dumps(block)
+
+
+def test_a_closed_reader_says_so_rather_than_indexing_an_empty_cache(both: Path) -> None:
+    """`close()` empties the cached `indptr`; without a flag the next read was numpy's IndexError."""
+    from sporadik import SporadikError
+
+    reader = SparseReader(both, 1)
+    reader.close()
+    for read in (lambda: reader.bounds_at(0), lambda: reader.slices_at([0, 1])):
+        with pytest.raises(SporadikError, match="closed"):
+            read()

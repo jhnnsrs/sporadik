@@ -101,6 +101,11 @@ array *raveled to two axes*, which genuinely is a `csr_matrix`, and says so.
 anndata group over the real matrix. Above it, the raveled pair it literally holds:
 `[shape[indexed_axis], prod(shape[a] for a in index_order)]`.
 
+A layout group may also hold a **`maxima`** array: one value per slice, the largest absolute value in
+it, computed once at write time so a reader never reduces over every value to get it. It is optional
+and unannounced — a reader that wants it looks for it, and one that does not is unaffected — which is
+why carrying it does not move the spec version.
+
 ---
 
 ## Why the block is last
@@ -171,6 +176,7 @@ not itself a sparse group.
 pip install sporadik              # numpy + zarr
 pip install sporadik[scipy]       # + read_layout(), which returns a scipy.sparse matrix
 pip install sporadik[obstore]     # + writing into an object store rather than a directory
+pip install sporadik[complete]    # both of the above
 ```
 
 ## Use
@@ -182,7 +188,7 @@ import sporadik
 counts = sp.random(20_000, 1_200, density=0.01, format="csr")
 sporadik.write_store("expression.zarr", [counts, counts.tocsc()])
 
-with sporadik.open_store("expression.zarr", layout=1) as feature_major:
+with sporadik.open_store("expression.zarr", axis=1) as feature_major:
     positions, values = feature_major.slice_at(7)      # two reads, nothing else fetched
 ```
 
@@ -190,9 +196,49 @@ Above rank two, build a layout per axis and unravel what comes back:
 
 ```python
 layout = sporadik.layout_over(shape, axis, data=..., indices=..., indptr=..., index_order=(0, 2))
-with sporadik.open_store(path, layout=1) as reader:
+with sporadik.open_store(path, axis=1) as reader:
     (a, c), values = reader.coords_at(7)               # through index_order, not axis order
 ```
+
+### The convenience layer
+
+Both of the above are the format itself. `sporadik.SparseArray` holds an array's layouts and builds
+them from whatever the values came in as; `sporadik.open_array` opens a written store and keeps a
+reader per axis. Nothing here is normative — it builds the same layouts by the same construction, and
+a caller that already holds its own is unaffected.
+
+```python
+array = sporadik.SparseArray.from_matrix(counts)       # both layouts, from one matrix
+array = sporadik.SparseArray.from_coords(shape, (cells, metabolites, adducts), intensity)
+array.write("expression.zarr")                         # one layout per axis
+
+with sporadik.open_array("expression.zarr") as store:
+    positions, values = store.slice_at(7, axis=1)      # the axis is still named, never defaulted
+```
+
+### Reading many slices
+
+One position at a time is the wrong unit for a caller with a list of them. `slices_at` reads a whole
+batch in **two waves whatever its size** — one for the `indptr` brackets, one for every `indices` and
+`data` run together — against two *per slice* otherwise.
+
+```python
+with sporadik.open_array("expression.zarr") as store:
+    selection = store.slices_at(cell_ids, axis=0)      # two waves, whatever len(cell_ids) is
+    selection = store.slices_over(10, 40, axis=0)      # contiguous: already one byte range
+    batch = store.dense_slices(cell_ids, axis=0)       # dense over the uncompressed axes
+```
+
+Two rather than one is the floor, not an implementation limit: the second wave's byte ranges are
+computed from the first wave's bytes, which is what `indptr` is for.
+
+A `Selection` carries the positions along with the bytes, because **row `i` of a batch is
+`positions[i]`, not `i`** — `selection.coords()` converts back to the original array's frame, and
+`selection.as_layout()` is for a caller who means "these slices are my array now" and says so.
+
+Order is the caller's, repeats are answered rather than refused, and an empty batch is an empty
+selection. Only exactly adjacent byte ranges are merged here; merging across a *gap* is left to the
+object store's own range-coalescing, which is measured, rather than guessed at a second time.
 
 ---
 

@@ -42,7 +42,11 @@ def test_the_documented_block_has_the_keys_the_code_writes():
         shape,
         {
             axis: sporadik.layout_over(
-                shape, axis, data=empty, indices=empty.astype(np.int32), indptr=np.zeros(shape[axis] + 1, dtype=np.int32)
+                shape,
+                axis,
+                data=empty,
+                indices=empty.astype(np.int32),
+                indptr=np.zeros(shape[axis] + 1, dtype=np.int32),
             )
             for axis in range(len(shape))
         },

@@ -57,7 +57,7 @@ reportUnknownParameterType = false
 reportMissingTypeStubs = false
 
 [tool.ruff.lint]
-extend-select = ["ANN", "D1"]
+extend-select = ["ANN", "D1", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # A test's name and docstring say what it asserts; a `-> None` on every one of them is noise that
@@ -66,7 +66,7 @@ extend-select = ["ANN", "D1"]
 
 [tool.ruff]
 exclude = [".git", ".ruff_cache", ".venv", "__pypackages__", "_build", "build", "dist"]
-line-length = 100
+line-length = 120
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
@@ -113,3 +113,9 @@ exclude_commit_patterns = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+# `testpaths` so a bare `pytest` runs the suite and nothing else -- without it a stray script or a
+# doctest in the tree can join the run and fail it for reasons the package does not own.
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"

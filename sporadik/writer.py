@@ -20,10 +20,17 @@ from pathlib import Path
 import numpy as np
 import zarr
 
-from sporadik.layout import MatrixLike, layouts_of, validate_layout
+from sporadik.layout import MatrixLike, layouts_of, maxima_of, validate_layout
 from sporadik.spec import BLOCK_KEY, LAYOUTS_GROUP, block_for
 
-__all__ = ["DEFAULT_CHUNK", "TARGET_CHUNK_BYTES", "chunk_for", "write_store", "write_store_into"]
+__all__ = [
+    "DEFAULT_CHUNK",
+    "TARGET_CHUNK_BYTES",
+    "chunk_for",
+    "write_layout_into",
+    "write_store",
+    "write_store_into",
+]
 
 #: Elements per chunk of ``data``, ``indices`` **and** ``indptr``.
 #:
@@ -60,13 +67,64 @@ def chunk_for(dtype: MatrixLike, nnz: int | None = None) -> int:
     return min(chunk, nnz) if nnz else chunk
 
 
-def write_store(path: Path | str, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False) -> Path:
+def write_layout_into(
+    parent: MatrixLike, layout: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+) -> MatrixLike:
+    """One layout, as a child group of ``parent``, and nothing else -- no block.
+
+    Split out because a layout is written in two situations and only one of them is writing a store:
+    the other is adding an axis to a store that already has some, where the layouts already there
+    must not be rewritten. It writes no block on purpose. The block is the completion marker, and a
+    function that writes chunks is not the one entitled to say the store is finished.
+    """
+    child = parent.create_group(layout.path.rsplit("/", 1)[-1])
+    child.attrs["encoding-type"] = layout.encoding
+    child.attrs["encoding-version"] = "0.1.0"
+    child.attrs["shape"] = [int(size) for size in layout.declared_shape]
+    # `maxima` is written alongside the three, and is the one array here that is *derived*. The
+    # reader's own docstring has always said to do this once at write time rather than per read --
+    # 1.8 s over the 88 M nonzeros of a 16 um matrix against 0.07 s in memory -- and nothing did it,
+    # so every caller who took the advice built the side channel itself.
+    #
+    # Deliberately not announced in the block. `describe` looks up the three names it needs and never
+    # enumerates a layout group for unknown children, so a reader that predates this ignores the
+    # extra array and `SUPPORTED_SPECS` keeps its single member. A fact derived from the artifact is
+    # read off the artifact, exactly as `range_readable` is off the codecs.
+    arrays = (
+        ("data", layout.data),
+        ("indices", layout.indices),
+        ("indptr", layout.indptr),
+        ("maxima", maxima_of(layout.data, layout.indptr)),
+    )
+    for name, array in arrays:
+        # `indptr` is chunked like the other two rather than written whole. Whole is fine for a
+        # 152 KB one over 19 059 features and a ~22 MB transfer for the 5.4 M-bin one, where two
+        # entries would pull the entire object; chunked, they cost one 128 KB GET that then
+        # serves the next 32 768 consecutive positions.
+        size = len(array) if byte_addressable else (chunk or chunk_for(array.dtype, len(array)))
+        child.create_array(
+            name,
+            shape=array.shape,
+            dtype=array.dtype,
+            chunks=(max(int(size), 1),),
+            compressors=None if byte_addressable else "auto",
+        )[:] = array
+    return child
+
+
+def write_store(
+    path: Path | str, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+) -> Path:
     """Write an array's layouts as a sparse store at ``path``."""
-    write_store_into(zarr.open_group(str(Path(path)), mode="w"), matrices, chunk=chunk, byte_addressable=byte_addressable)
+    write_store_into(
+        zarr.open_group(str(Path(path)), mode="w"), matrices, chunk=chunk, byte_addressable=byte_addressable
+    )
     return Path(path)
 
 
-def write_store_into(group: MatrixLike, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False) -> MatrixLike:
+def write_store_into(
+    group: MatrixLike, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+) -> MatrixLike:
     """Write the layouts into an already-opened zarr group, and return it.
 
     Split from :func:`write_store` so the same bytes can be written to a local directory or straight
@@ -83,29 +141,17 @@ def write_store_into(group: MatrixLike, matrices: MatrixLike, *, chunk: int | No
     layouts = layouts_of(matrices)
     for layout in layouts.values():
         validate_layout(
-            data=layout.data, indices=layout.indices, indptr=layout.indptr, shape=layout.shape, indexed_axis=layout.indexed_axis
+            data=layout.data,
+            indices=layout.indices,
+            indptr=layout.indptr,
+            shape=layout.shape,
+            indexed_axis=layout.indexed_axis,
         )
 
     shape = next(iter(layouts.values())).shape
     parent = group.create_group(LAYOUTS_GROUP)
     for _, layout in sorted(layouts.items()):
-        child = parent.create_group(layout.path.rsplit("/", 1)[-1])
-        child.attrs["encoding-type"] = layout.encoding
-        child.attrs["encoding-version"] = "0.1.0"
-        child.attrs["shape"] = [int(size) for size in layout.declared_shape]
-        for name, array in (("data", layout.data), ("indices", layout.indices), ("indptr", layout.indptr)):
-            # `indptr` is chunked like the other two rather than written whole. Whole is fine for a
-            # 152 KB one over 19 059 features and a ~22 MB transfer for the 5.4 M-bin one, where two
-            # entries would pull the entire object; chunked, they cost one 128 KB GET that then
-            # serves the next 32 768 consecutive positions.
-            size = len(array) if byte_addressable else (chunk or chunk_for(array.dtype, len(array)))
-            child.create_array(
-                name,
-                shape=array.shape,
-                dtype=array.dtype,
-                chunks=(max(int(size), 1),),
-                compressors=None if byte_addressable else "auto",
-            )[:] = array
+        write_layout_into(parent, layout, chunk=chunk, byte_addressable=byte_addressable)
 
     group.attrs[BLOCK_KEY] = block_for(shape, layouts)
     return group
