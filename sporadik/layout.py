@@ -107,11 +107,16 @@ def maxima_of(data: npt.NDArray[Any], indptr: npt.NDArray[Any]) -> npt.NDArray[A
 
     An empty run is zero, not the identity of `maximum` -- `reduceat` hands back the element at the
     start index for a run of length zero, which is the *next* slice's first value.
+
+    The starts are clipped to the last value's index because `reduceat` refuses a start equal to
+    ``len(data)``, which is exactly what every trailing empty run has (a spike raster stored CSC:
+    the samples after the last spike). Those runs are zeroed below whatever `reduceat` put there.
     """
+    values = np.abs(np.asarray(data))
     edges = np.asarray(indptr)
-    out = np.zeros(max(len(edges) - 1, 0), dtype=np.asarray(data).dtype)
-    if np.asarray(data).size:
-        np.maximum.reduceat(np.abs(np.asarray(data)), edges[:-1], out=out)
+    out = np.zeros(max(len(edges) - 1, 0), dtype=values.dtype)
+    if values.size:
+        np.maximum.reduceat(values, np.minimum(edges[:-1], values.size - 1), out=out)
     out[np.diff(edges) == 0] = 0
     return out
 

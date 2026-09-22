@@ -194,6 +194,20 @@ def test_one_layout_is_a_legal_store(tmp_path: Path, matrix: Any) -> None:
     assert info.indexing(0) is None
 
 
+def test_trailing_empty_slices_are_written(tmp_path: Path) -> None:
+    """A slice with nothing in it after the last value -- a raster's samples after its last spike.
+
+    Every such run starts at ``len(data)``, which ``np.maximum.reduceat`` refuses outright; the
+    maxima of those slices are zero, like any other empty run.
+    """
+    raster = sp.csr_matrix(
+        (np.ones(3, dtype=np.float32), ([0, 1, 2], [0, 5, 10])), shape=(3, 50)
+    ).tocsc()
+    store = write_store(tmp_path / "raster.zarr", raster)
+    assert describe(store).layouts[1].nnz == 3
+    np.testing.assert_array_equal(read_layout(store, 1).toarray(), raster.toarray())
+
+
 # --------------------------------------------------------------------------- #
 # What it refuses to write
 # --------------------------------------------------------------------------- #
