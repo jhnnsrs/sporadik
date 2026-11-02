@@ -56,7 +56,8 @@ reportUnknownParameterType = false
 reportMissingTypeStubs = false
 
 [tool.ruff.lint]
-extend-select = ["ANN", "D1", "E501"]
+extend-select = ["ANN", "D1", "E501", "UP"]
+extend-ignore = ["UP037", "UP038", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 # A test's name and docstring say what it asserts; a `-> None` on every one of them is noise that
