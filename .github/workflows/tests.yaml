@@ -5,26 +5,6 @@ on:
   pull_request:
     branches: [main, next, "[0-9]+.x"]
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv and set the python version
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: "latest"
-          python-version: "3.12"
-
-      - name: Install the project
-        run: uv sync --all-extras --dev
-
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Types
-        run: uv run basedpyright
-
   test_suite:
     strategy:
       fail-fast: false

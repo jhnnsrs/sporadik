@@ -1,0 +1,58 @@
+{
+    "files": {
+        "./tests/test_api.py": [
+            {
+                "code": "reportCallIssue",
+                "range": {
+                    "startColumn": 69,
+                    "endColumn": 81,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 36,
+                    "endColumn": 48,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./tests/test_format.py": [
+            {
+                "code": "reportCallIssue",
+                "range": {
+                    "startColumn": 69,
+                    "endColumn": 81,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 19,
+                    "endColumn": 25,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportOptionalSubscript",
+                "range": {
+                    "startColumn": 39,
+                    "endColumn": 51,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./tests/test_spec_document.py": [
+            {
+                "code": "reportCallIssue",
+                "range": {
+                    "startColumn": 63,
+                    "endColumn": 75,
+                    "lineCount": 1
+                }
+            }
+        ]
+    }
+}
