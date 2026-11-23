@@ -15,13 +15,13 @@ import sporadik
 _SUBMODULES = {module.name for module in pkgutil.iter_modules(sporadik.__path__)}
 
 
-def test_everything_promised_is_actually_there():
+def test_everything_promised_is_actually_there() -> None:
     """Every name in `__all__` resolves. A promise that does not import is worse than no promise."""
     missing = [name for name in sporadik.__all__ if not hasattr(sporadik, name)]
     assert not missing, f"promised but absent: {missing}"
 
 
-def test_nothing_public_is_left_out_of_the_promise():
+def test_nothing_public_is_left_out_of_the_promise() -> None:
     """Nothing reachable at the root is left undocumented and accidentally supported."""
     public = {
         name
@@ -31,7 +31,7 @@ def test_nothing_public_is_left_out_of_the_promise():
     assert not public - set(sporadik.__all__)
 
 
-def test_every_submodule_name_is_promised_at_the_root():
+def test_every_submodule_name_is_promised_at_the_root() -> None:
     """The other direction, and the one the check above structurally cannot see.
 
     `dir(sporadik)` only holds what `__init__` imported, so a public name in a submodule that was
@@ -56,7 +56,7 @@ def test_every_submodule_name_is_promised_at_the_root():
     )
 
 
-def test_the_promise_lists_each_name_once():
+def test_the_promise_lists_each_name_once() -> None:
     """A name twice is a merge that went wrong, and `__all__` is where it would show."""
     duplicated = sorted(
         {name for name in sporadik.__all__ if sporadik.__all__.count(name) > 1}

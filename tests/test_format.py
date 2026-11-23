@@ -15,18 +15,24 @@ upload path writes into a granted S3 prefix through the one shared writer.
 """
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 import scipy.sparse as sp
 import zarr
+from zarr.abc.store import ByteRequest
+from zarr.core.buffer import Buffer, BufferPrototype
 
 from sporadik import (
     BLOCK_KEY,
     LAYOUTS_GROUP,
     SPEC_VERSION,
+    Layout,
+    Selection,
     SparseReader,
     chunk_for,
     describe,
@@ -44,7 +50,7 @@ ROWS, COLS, DENSITY = 400, 90, 0.05
 
 
 @pytest.fixture
-def matrix() -> Any:
+def matrix() -> sp.csc_matrix:
     """One reproducible CSC matrix. Objects on axis 0, features on axis 1."""
     return sp.random(
         ROWS, COLS, density=DENSITY, format="csc", dtype=np.float32, random_state=0
@@ -52,7 +58,7 @@ def matrix() -> Any:
 
 
 @pytest.fixture
-def both(tmp_path: Path, matrix: Any) -> Path:
+def both(tmp_path: Path, matrix: sp.csc_matrix) -> Path:
     """A store holding both layouts of `matrix` -- the shape a real ingest writes."""
     return write_store(tmp_path / "store.zarr", [matrix, matrix.tocsr()])
 
@@ -72,7 +78,7 @@ def _rewrite_block(path: Path, **changes: Any) -> None:
 # --------------------------------------------------------------------------- #
 # What it writes
 # --------------------------------------------------------------------------- #
-def test_both_layouts_round_trip(both: Path, matrix: Any) -> None:
+def test_both_layouts_round_trip(both: Path, matrix: sp.csc_matrix) -> None:
     """The values come back identical, from each layout independently."""
     for axis in (0, 1):
         back = read_layout(both, axis)
@@ -110,7 +116,7 @@ def test_each_layout_is_a_plain_anndata_group(both: Path) -> None:
         assert BLOCK_KEY not in attrs
 
 
-def test_anndata_reads_a_layout_unchanged(both: Path, matrix: Any) -> None:
+def test_anndata_reads_a_layout_unchanged(both: Path, matrix: sp.csc_matrix) -> None:
     """The whole reason this is not a bespoke format: anndata reads it with no cooperation.
 
     Asserted rather than remembered, because it is the single claim the decision not to invent a
@@ -127,7 +133,7 @@ def test_anndata_reads_a_layout_unchanged(both: Path, matrix: Any) -> None:
 
 
 def test_every_array_is_chunked_at_the_request_granularity(
-    both: Path, matrix: Any
+    both: Path, matrix: sp.csc_matrix
 ) -> None:
     """Chunked and compressed, sized for one S3 request -- including `indptr`.
 
@@ -155,7 +161,7 @@ def test_every_array_is_chunked_at_the_request_granularity(
 
 
 def test_a_byte_addressable_store_reads_only_its_own_bytes(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csc_matrix
 ) -> None:
     """The other trade, kept because it is the right one for a cold reader that caches nothing.
 
@@ -173,7 +179,9 @@ def test_a_byte_addressable_store_reads_only_its_own_bytes(
     store = reader._group["data"].store_path.store
     original = store.get_partial_values
 
-    async def counting(prototype: Any, key_ranges: Any) -> Any:
+    async def counting(
+        prototype: BufferPrototype, key_ranges: Iterable[tuple[str, ByteRequest | None]]
+    ) -> list[Buffer | None]:
         pairs = list(key_ranges)
         for _, request in pairs:
             if isinstance(request, RangeByteRequest):
@@ -197,7 +205,7 @@ def test_a_byte_addressable_store_reads_only_its_own_bytes(
 
 
 def test_both_write_modes_read_back_the_same_values(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csc_matrix
 ) -> None:
     """The trade is where the bytes go, never what they say."""
     chunked = write_store(tmp_path / "a.zarr", matrix)
@@ -207,7 +215,7 @@ def test_both_write_modes_read_back_the_same_values(
             assert np.allclose(one.dense_slice(position), two.dense_slice(position))
 
 
-def test_one_layout_is_a_legal_store(tmp_path: Path, matrix: Any) -> None:
+def test_one_layout_is_a_legal_store(tmp_path: Path, matrix: sp.csc_matrix) -> None:
     """A store answering one question is not half a store; it offers one capability."""
     store = write_store(tmp_path / "one.zarr", matrix)
     info = describe(store)
@@ -233,19 +241,19 @@ def test_trailing_empty_slices_are_written(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # What it refuses to write
 # --------------------------------------------------------------------------- #
-def test_two_of_the_same_layout_are_refused(matrix: Any) -> None:
+def test_two_of_the_same_layout_are_refused(matrix: sp.csc_matrix) -> None:
     """One capability twice, with nothing to say which a reader should use."""
     with pytest.raises(ValueError, match="one capability twice"):
         layouts_of([matrix, matrix.copy()])
 
 
-def test_two_shapes_are_two_stores(matrix: Any) -> None:
+def test_two_shapes_are_two_stores(matrix: sp.csc_matrix) -> None:
     """A transpose that was never re-encoded is the way this actually happens."""
     with pytest.raises(ValueError, match="different shapes"):
         layouts_of([matrix, matrix.T.tocsr()])
 
 
-def test_a_coo_matrix_says_how_to_fix_it(matrix: Any) -> None:
+def test_a_coo_matrix_says_how_to_fix_it(matrix: sp.csc_matrix) -> None:
     """COO carries its nonzeros differently, so it fails on the missing array, not the format.
 
     A `TypeError` rather than a `ValueError`, and deliberately so: there is no `indices` to read,
@@ -266,7 +274,7 @@ def test_a_coo_matrix_says_how_to_fix_it(matrix: Any) -> None:
     ],
 )
 def test_validate_sparse_refuses_arrays_that_contradict_the_declaration(
-    matrix: Any, changes: dict, expected: str
+    matrix: sp.csc_matrix, changes: dict, expected: str
 ) -> None:
     """Checked before the upload, because the server's copy of this check costs a round trip."""
     fields = {
@@ -283,7 +291,9 @@ def test_validate_sparse_refuses_arrays_that_contradict_the_declaration(
 # --------------------------------------------------------------------------- #
 # What it refuses to read -- the half-written store, and its relatives
 # --------------------------------------------------------------------------- #
-def test_a_store_missing_its_chunks_is_refused(tmp_path: Path, matrix: Any) -> None:
+def test_a_store_missing_its_chunks_is_refused(
+    tmp_path: Path, matrix: sp.csc_matrix
+) -> None:
     """The failure the block exists for, and the one that used to be completely silent.
 
     Deleting a layout's chunk objects leaves every ``zarr.json`` intact, so before the block this
@@ -313,7 +323,9 @@ def test_a_store_missing_its_chunks_is_refused(tmp_path: Path, matrix: Any) -> N
         describe(store)
 
 
-def test_a_store_with_no_block_is_refused(tmp_path: Path, matrix: Any) -> None:
+def test_a_store_with_no_block_is_refused(
+    tmp_path: Path, matrix: sp.csc_matrix
+) -> None:
     """An upload that died before its last write, which is what a missing block means."""
     store = write_store(tmp_path / "nb.zarr", matrix)
     metadata = json.loads((store / "zarr.json").read_text())
@@ -349,7 +361,7 @@ def test_a_layout_named_but_absent_is_refused(both: Path) -> None:
 
 
 def test_a_layout_filed_under_the_wrong_name_is_refused(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csc_matrix
 ) -> None:
     """The path and the group's own `encoding-type` are two statements of one fact.
 
@@ -390,7 +402,7 @@ def test_a_store_naming_no_layouts_is_refused(both: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Reading one slice
 # --------------------------------------------------------------------------- #
-def test_a_slice_is_the_column_it_should_be(both: Path, matrix: Any) -> None:
+def test_a_slice_is_the_column_it_should_be(both: Path, matrix: sp.csc_matrix) -> None:
     """The read a colouring makes: one feature, every object's value for it."""
     with open_store(both, 1) as reader:
         for position in (0, 7, COLS - 1):
@@ -401,7 +413,7 @@ def test_a_slice_is_the_column_it_should_be(both: Path, matrix: Any) -> None:
             assert np.allclose(reader.dense_slice(position), column)
 
 
-def test_a_slice_is_the_row_it_should_be(both: Path, matrix: Any) -> None:
+def test_a_slice_is_the_row_it_should_be(both: Path, matrix: sp.csc_matrix) -> None:
     """The read a hover makes, out of the other layout: one object, everything in it."""
     rows = matrix.tocsr()
     with open_store(both, 0) as reader:
@@ -409,7 +421,7 @@ def test_a_slice_is_the_row_it_should_be(both: Path, matrix: Any) -> None:
         assert np.allclose(reader.dense_slice(11), row)
 
 
-def test_maxima_matches_a_dense_reduction(both: Path, matrix: Any) -> None:
+def test_maxima_matches_a_dense_reduction(both: Path, matrix: sp.csc_matrix) -> None:
     """The window an ingest stores, because the server serves no statistics."""
     with open_store(both, 1) as reader:
         assert np.allclose(reader.maxima(), np.abs(matrix.toarray()).max(axis=0))
@@ -425,7 +437,7 @@ def test_a_position_off_the_end_is_an_index_error(both: Path) -> None:
 
 
 def test_reading_a_layout_the_store_does_not_hold_is_refused(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csc_matrix
 ) -> None:
     """Not a slower read -- a scan of every byte, which is why it is refused instead."""
     store = write_store(tmp_path / "csc_only.zarr", matrix)
@@ -440,7 +452,7 @@ def test_two_layouts_make_the_choice_explicit(both: Path) -> None:
 
 
 def test_a_layout_built_from_raw_arrays_needs_no_scipy(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csc_matrix
 ) -> None:
     """`scipy` is not a dependency of this package, and the writer's input says so."""
     layout = layout_over(
@@ -469,7 +481,7 @@ def cube() -> np.ndarray:
     return (rng.random(CUBE) * (rng.random(CUBE) < 0.3)).astype(np.float32)
 
 
-def _layout_from_dense(dense: np.ndarray, indexed_axis: int) -> Any:
+def _layout_from_dense(dense: np.ndarray, indexed_axis: int) -> Layout:
     """The three arrays for one layout of a dense array, at any rank.
 
     Literally "move the compressed axis to the front, flatten the rest, store CSR" -- which is
@@ -627,7 +639,9 @@ def _count_range_calls(reader: SparseReader) -> tuple[list[list[int]], Any]:
     original = store.get_partial_values
     calls: list[list[int]] = []
 
-    async def counting(prototype: Any, key_ranges: Any) -> Any:
+    async def counting(
+        prototype: BufferPrototype, key_ranges: Iterable[tuple[str, ByteRequest | None]]
+    ) -> list[Buffer | None]:
         pairs = list(key_ranges)
         calls.append(
             [
@@ -647,7 +661,7 @@ def _count_chunk_gets(reader: SparseReader) -> tuple[list[str], Any]:
     original = store.get
     keys: list[str] = []
 
-    async def counting(key: str, *args: Any, **kwargs: Any) -> Any:
+    async def counting(key: str, *args: Any, **kwargs: Any) -> Buffer | None:
         keys.append(key)
         return await original(key, *args, **kwargs)
 
@@ -656,7 +670,7 @@ def _count_chunk_gets(reader: SparseReader) -> tuple[list[str], Any]:
 
 
 @pytest.fixture
-def exact(tmp_path: Path, matrix: Any) -> Path:
+def exact(tmp_path: Path, matrix: sp.csc_matrix) -> Path:
     """Both layouts, written byte-addressably -- the variant whose reads are range reads."""
     return write_store(
         tmp_path / "exact.zarr", [matrix, matrix.tocsr()], byte_addressable=True
@@ -827,7 +841,7 @@ def test_a_position_off_the_end_is_an_index_error_in_a_batch_too(both: Path) -> 
 
 
 def test_a_selection_unravels_to_coordinates_in_the_original_frame(
-    both: Path, matrix: Any
+    both: Path, matrix: sp.csc_matrix
 ) -> None:
     """Row *i* is ``positions[i]``, and `coords` is what says so.
 
@@ -843,7 +857,7 @@ def test_a_selection_unravels_to_coordinates_in_the_original_frame(
 
 
 def test_a_selection_can_be_written_as_a_store_of_its_own(
-    tmp_path: Path, both: Path, matrix: Any
+    tmp_path: Path, both: Path, matrix: sp.csc_matrix
 ) -> None:
     """`as_layout` is the caller saying the selection *is* the array now -- and then it writes."""
     selection = SparseReader(both, 1).slices_over(10, 40)
@@ -876,7 +890,7 @@ def test_reading_inside_an_event_loop_says_to_use_a_worker_thread(exact: Path) -
 
     reader = SparseReader(exact, 1)
 
-    async def read() -> Any:
+    async def read() -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
         return reader.slice_at(7)
 
     with pytest.raises(SporadikError, match="to_thread"):
@@ -889,7 +903,7 @@ def test_reading_from_a_worker_thread_inside_an_event_loop_works(exact: Path) ->
 
     reader = SparseReader(exact, 1)
 
-    async def read() -> Any:
+    async def read() -> Selection:
         return await asyncio.to_thread(reader.slices_at, [7, 8])
 
     selection = asyncio.run(read())
@@ -897,7 +911,7 @@ def test_reading_from_a_worker_thread_inside_an_event_loop_works(exact: Path) ->
 
 
 def test_stored_maxima_match_the_reduction_they_replace(
-    both: Path, matrix: Any
+    both: Path, matrix: sp.csc_matrix
 ) -> None:
     """The writer now does what this module's own advice always said to do at ingest."""
     reader = SparseReader(both, 1)

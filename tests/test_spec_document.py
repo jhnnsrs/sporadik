@@ -36,7 +36,7 @@ def _documented_block() -> dict:
     )
 
 
-def test_the_documented_block_has_the_keys_the_code_writes():
+def test_the_documented_block_has_the_keys_the_code_writes() -> None:
     """The document and `block_for` describe the same object."""
     documented = _documented_block()
     shape = tuple(documented["shape"])
@@ -66,7 +66,7 @@ def test_the_documented_block_has_the_keys_the_code_writes():
     )
 
 
-def test_the_documented_paths_follow_the_rule_the_document_states():
+def test_the_documented_paths_follow_the_rule_the_document_states() -> None:
     """`layouts/axis{k}` -- recomputed, not copied, so the table and the function cannot diverge."""
     documented = _documented_block()
     rank = len(documented["shape"])
@@ -78,7 +78,9 @@ def test_the_documented_paths_follow_the_rule_the_document_states():
         )
 
 
-def test_a_store_written_here_reads_back_through_the_documented_block(tmp_path):
+def test_a_store_written_here_reads_back_through_the_documented_block(
+    tmp_path: pathlib.Path,
+) -> None:
     """Not just shaped right -- what the writer actually lands matches the document, key for key."""
     matrix = sp.random(
         400, 90, density=0.05, format="csc", dtype=np.float32, random_state=0
@@ -104,7 +106,7 @@ def test_a_store_written_here_reads_back_through_the_documented_block(tmp_path):
         '"sporadik"',
     ],
 )
-def test_the_document_states_the_load_bearing_claims(claim):
+def test_the_document_states_the_load_bearing_claims(claim: str) -> None:
     """The three sentences a second implementer cannot get right by guessing.
 
     Not a style check: the invariant, the naming rule and the attribute key are the parts of this
@@ -114,7 +116,7 @@ def test_the_document_states_the_load_bearing_claims(claim):
     assert claim in README.read_text(), f"the specification no longer states: {claim}"
 
 
-def test_the_block_key_is_not_borrowed_from_a_consumer():
+def test_the_block_key_is_not_borrowed_from_a_consumer() -> None:
     """The namespace is the format's own.
 
     It was `mikro-sparse` while the format lived inside one client. A format that names a consumer

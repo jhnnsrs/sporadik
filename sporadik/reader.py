@@ -551,7 +551,7 @@ class SparseReader:
             buffers = _run(store.get_partial_values(default_buffer_prototype(), pairs))
 
         out: list[npt.NDArray[Any]] = []
-        for (name, _, _), slot in zip(wanted, slots):
+        for (name, _, _), slot in zip(wanted, slots, strict=True):
             dtype = arrays[name].dtype
             if slot is None:
                 out.append(np.empty(0, dtype=dtype))
@@ -625,7 +625,7 @@ class SparseReader:
         # not one per slice.
         lo, hi = _coalesce(positions, positions + 2)
         buffers = self._read_ranges(
-            [("indptr", int(a), int(b)) for a, b in zip(lo, hi)]
+            [("indptr", int(a), int(b)) for a, b in zip(lo, hi, strict=True)]
         )
         edges = np.concatenate(buffers) if buffers else np.empty(0, dtype=np.int64)
         offsets = np.concatenate(([0], np.cumsum(hi - lo)))[:-1]
@@ -673,7 +673,7 @@ class SparseReader:
             data = np.empty(0, dtype=self._group["data"].dtype)
             indptr = np.zeros(wanted.size + 1, dtype=np.int64)
         elif self.info.range_readable:
-            runs = [(int(a), int(b)) for a, b in zip(run_lo, run_hi)]
+            runs = [(int(a), int(b)) for a, b in zip(run_lo, run_hi, strict=True)]
             fetched = self._read_ranges(
                 [("indices", a, b) for a, b in runs] + [("data", a, b) for a, b in runs]
             )

@@ -11,7 +11,6 @@ test's docstring.
 """
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -42,7 +41,7 @@ CUBE = (6, 4, 5)
 
 
 @pytest.fixture
-def matrix() -> Any:
+def matrix() -> sp.csr_matrix:
     """One reproducible CSR matrix. Objects on axis 0, features on axis 1."""
     return sp.random(
         ROWS, COLS, density=DENSITY, format="csr", dtype=np.float32, random_state=0
@@ -50,7 +49,7 @@ def matrix() -> Any:
 
 
 @pytest.fixture
-def hand(matrix: Any) -> dict[int, Layout]:
+def hand(matrix: sp.csr_matrix) -> dict[int, Layout]:
     """The layouts a caller built before this module existed: the matrix, and its transpose-encoded self."""
     return layouts_of([matrix, matrix.tocsc()])
 
@@ -79,7 +78,7 @@ def _assert_same(built: Layout, expected: Layout) -> None:
 
 
 def test_from_matrix_builds_both_layouts_of_one_matrix(
-    matrix: Any, hand: dict[int, Layout]
+    matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """The `.tocsc()` line every ingest script wrote, absorbed -- and to the same bytes.
 
@@ -93,7 +92,7 @@ def test_from_matrix_builds_both_layouts_of_one_matrix(
 
 
 def test_asking_for_one_axis_buys_one_layout(
-    matrix: Any, hand: dict[int, Layout]
+    matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """Each layout is another copy of the nonzeros, so `axes=` is how a caller declines to pay.
 
@@ -106,7 +105,7 @@ def test_asking_for_one_axis_buys_one_layout(
 
 
 def test_from_coords_builds_what_the_scipy_construction_builds(
-    matrix: Any, hand: dict[int, Layout]
+    matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """Coordinates in, the same layouts out -- the rank-two case of the general constructor."""
     coo = matrix.tocoo()
@@ -157,7 +156,7 @@ def test_from_dense_keeps_only_the_cells_that_are_not_zero(cube: np.ndarray) -> 
 
 
 def test_from_anndata_reads_an_x_without_rehydrating_a_matrix(
-    tmp_path: Path, matrix: Any, hand: dict[int, Layout]
+    tmp_path: Path, matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """A layout *is* anndata's spelling, so an on-disk X is already one -- in every spelling of it.
 
@@ -214,7 +213,7 @@ def test_duplicates_can_be_refused_instead_of_summed() -> None:
 
 
 def test_as_sparse_array_dispatches_on_what_a_value_carries(
-    matrix: Any, cube: np.ndarray
+    matrix: sp.csr_matrix, cube: np.ndarray
 ) -> None:
     """One entry point for callers holding "whatever it came in as", duck-typed like `layout_of`.
 
@@ -274,7 +273,7 @@ def test_to_coords_is_the_inverse_of_the_compression(cube: np.ndarray) -> None:
 
 
 def test_a_sparse_array_is_accepted_wherever_a_list_of_matrices_is(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """One branch in `layouts_of` is what makes every consumer take the new object with no change.
 
@@ -292,7 +291,7 @@ def test_a_sparse_array_is_accepted_wherever_a_list_of_matrices_is(
 
 
 def test_a_layout_written_through_the_api_is_still_read_by_anndata(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """The interop claim, restated over the convenience layer rather than assumed to carry."""
     anndata = pytest.importorskip("anndata")
@@ -342,7 +341,7 @@ def test_reading_without_naming_an_axis_is_refused_when_there_is_a_choice(
         store.slice_at(1)
 
 
-def test_one_layout_is_not_a_choice(tmp_path: Path, matrix: Any) -> None:
+def test_one_layout_is_not_a_choice(tmp_path: Path, matrix: sp.csr_matrix) -> None:
     """With a single layout there is nothing to decide, so `axis=` is not required to say it."""
     path = SparseArray.from_matrix(matrix, axes=(0,)).write(tmp_path / "one.zarr")
     with open_array(path) as store:
@@ -352,7 +351,7 @@ def test_one_layout_is_not_a_choice(tmp_path: Path, matrix: Any) -> None:
 
 
 def test_asking_along_an_axis_no_layout_compresses_says_what_that_would_cost(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """Not slower -- a scan of every byte, which is the measurement the second layout exists for."""
     path = SparseArray.from_matrix(matrix, axes=(0,)).write(tmp_path / "one.zarr")
@@ -399,7 +398,7 @@ def test_the_store_can_be_used_without_a_with_block(written: Path) -> None:
 
 
 def test_a_coo_matrix_is_converted_rather_than_refused(
-    matrix: Any, hand: dict[int, Layout]
+    matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """`layout_of` refuses COO, correctly; the converter does not have to.
 
@@ -422,7 +421,7 @@ def test_a_coo_matrix_is_converted_rather_than_refused(
 # --------------------------------------------------------------------------- #
 
 
-def test_coordinates_off_the_end_name_the_axis_and_the_value(cube: Any) -> None:
+def test_coordinates_off_the_end_name_the_axis_and_the_value(cube: np.ndarray) -> None:
     """An out-of-range coordinate is refused here, where the coordinate is still in hand.
 
     Left to what happens downstream it is two different silences: on a raveled axis numpy says
@@ -441,7 +440,9 @@ def test_coordinates_off_the_end_name_the_axis_and_the_value(cube: Any) -> None:
         )
 
 
-def test_an_array_holding_no_layouts_is_refused_at_construction(matrix: Any) -> None:
+def test_an_array_holding_no_layouts_is_refused_at_construction(
+    matrix: sp.csr_matrix,
+) -> None:
     """The class says an instance of it is a set that could be written; now that is true.
 
     Empty, it used to construct happily and then raise `StopIteration` from `shape` -- the worst
@@ -453,7 +454,7 @@ def test_an_array_holding_no_layouts_is_refused_at_construction(matrix: Any) -> 
         SparseArray.from_matrices([matrix, matrix[:10].tocsc()])
 
 
-def test_two_arrays_of_the_same_values_compare_equal(matrix: Any) -> None:
+def test_two_arrays_of_the_same_values_compare_equal(matrix: sp.csr_matrix) -> None:
     """`store.to_array() == array` is the first assertion anyone writes, and it used to raise.
 
     The dataclass compared its fields as a tuple, which compares numpy arrays with `==`, which
@@ -468,7 +469,9 @@ def test_two_arrays_of_the_same_values_compare_equal(matrix: Any) -> None:
     ).layout(0)
 
 
-def test_the_layouts_cannot_be_reached_around_and_mutated(matrix: Any) -> None:
+def test_the_layouts_cannot_be_reached_around_and_mutated(
+    matrix: sp.csr_matrix,
+) -> None:
     """`frozen=True` blocks rebinding, not mutation, so the refusals were a formality."""
     array = SparseArray.from_matrix(matrix)
     with pytest.raises(TypeError):
@@ -477,7 +480,9 @@ def test_the_layouts_cannot_be_reached_around_and_mutated(matrix: Any) -> None:
         hash(array)
 
 
-def test_asking_for_fewer_axes_through_the_dispatcher_buys_fewer(matrix: Any) -> None:
+def test_asking_for_fewer_axes_through_the_dispatcher_buys_fewer(
+    matrix: sp.csr_matrix,
+) -> None:
     """`axes=` used to be dropped without a word by the branches built from existing layouts."""
     layouts = list(SparseArray.from_matrix(matrix))
     assert as_sparse_array(layouts, axes=(1,)).indexed_axes == (1,)
@@ -489,7 +494,9 @@ def test_asking_for_fewer_axes_through_the_dispatcher_buys_fewer(matrix: Any) ->
         as_sparse_array(layouts, axes=(5,))
 
 
-def test_duplicates_can_be_refused_through_the_dispatcher(matrix: Any) -> None:
+def test_duplicates_can_be_refused_through_the_dispatcher(
+    matrix: sp.csr_matrix,
+) -> None:
     """A COO reaching the matrix branch had its duplicates summed by scipy, silently.
 
     Which is the one thing `Duplicates` exists to document, because a summed duplicate is
@@ -505,7 +512,7 @@ def test_duplicates_can_be_refused_through_the_dispatcher(matrix: Any) -> None:
 
 
 def test_a_store_reads_a_batch_along_every_axis_it_compresses(
-    written: Path, cube: Any
+    written: Path, cube: np.ndarray
 ) -> None:
     """The batch methods forward exactly as the single-position ones do, axis and all."""
     with open_array(written) as store:
@@ -543,7 +550,7 @@ def test_a_batch_without_an_axis_is_refused_when_there_is_a_choice(
 
 
 def test_from_layouts_and_from_matrices_build_what_the_hand_written_form_built(
-    matrix: Any, hand: dict[int, Layout]
+    matrix: sp.csr_matrix, hand: dict[int, Layout]
 ) -> None:
     """The two converters that add nothing, asserted against the construction they replace."""
     for built in (
@@ -557,7 +564,7 @@ def test_from_layouts_and_from_matrices_build_what_the_hand_written_form_built(
 
 
 def test_asking_a_layout_for_an_axis_it_does_not_hold_names_the_ones_it_does(
-    matrix: Any,
+    matrix: sp.csr_matrix,
 ) -> None:
     """The refusal says what it costs to fix, rather than only that it cannot."""
     array = SparseArray.from_matrix(matrix, axes=(0,))
@@ -566,7 +573,9 @@ def test_asking_a_layout_for_an_axis_it_does_not_hold_names_the_ones_it_does(
         array.layout(1)
 
 
-def test_to_scipy_returns_the_matrix_the_layout_came_from(matrix: Any) -> None:
+def test_to_scipy_returns_the_matrix_the_layout_came_from(
+    matrix: sp.csr_matrix,
+) -> None:
     """Rank two only, and the axis is keyword-only like every other read in the package."""
     array = SparseArray.from_matrix(matrix)
     assert np.allclose(array.to_scipy(axis=0).toarray(), matrix.toarray())
@@ -578,13 +587,13 @@ def test_to_scipy_returns_the_matrix_the_layout_came_from(matrix: Any) -> None:
         cube.to_scipy(axis=0)
 
 
-def test_to_dense_is_the_inverse_of_from_dense(cube: Any) -> None:
+def test_to_dense_is_the_inverse_of_from_dense(cube: np.ndarray) -> None:
     """`from_dense` had no counterpart, so a round trip could not be stated in one line."""
     assert np.allclose(SparseArray.from_dense(cube).to_dense(), cube)
 
 
 def test_write_into_puts_the_layouts_in_a_group_that_is_already_open(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """The split that lets one writer serve a directory and a granted object-store prefix alike."""
     import zarr
@@ -595,7 +604,7 @@ def test_write_into_puts_the_layouts_in_a_group_that_is_already_open(
 
 
 def test_a_store_answers_the_things_it_knows_without_reading_any_values(
-    written: Path, cube: Any
+    written: Path, cube: np.ndarray
 ) -> None:
     """`nnz`, `dtype` and `len` come off the description, which is why they cost nothing."""
     with open_array(written) as store:
@@ -606,7 +615,7 @@ def test_a_store_answers_the_things_it_knows_without_reading_any_values(
 
 
 def test_the_single_position_reads_agree_with_the_matrix_they_were_written_from(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """`bounds_at`, `dense_slice`, `maxima` and `to_scipy` on a store -- none had been called."""
     path = SparseArray.from_matrix(matrix).write(tmp_path / "reads.zarr")
@@ -621,7 +630,7 @@ def test_the_single_position_reads_agree_with_the_matrix_they_were_written_from(
 
 
 def test_add_axis_writes_one_layout_without_rewriting_the_others(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """The point is what it does *not* touch: the layouts already there keep their bytes."""
     path = SparseArray.from_matrix(matrix, axes=(0,)).write(tmp_path / "grow.zarr")
@@ -652,7 +661,7 @@ def test_add_axis_writes_one_layout_without_rewriting_the_others(
 
 
 def test_add_axis_is_a_no_op_for_an_axis_already_there(
-    tmp_path: Path, matrix: Any
+    tmp_path: Path, matrix: sp.csr_matrix
 ) -> None:
     """And a refusal for one the array does not have, in the same words `with_axis` uses."""
     path = SparseArray.from_matrix(matrix).write(tmp_path / "full.zarr")
@@ -662,7 +671,9 @@ def test_add_axis_is_a_no_op_for_an_axis_already_there(
             store.add_axis(5)
 
 
-def test_to_layout_reads_one_whole_layout_back(tmp_path: Path, matrix: Any) -> None:
+def test_to_layout_reads_one_whole_layout_back(
+    tmp_path: Path, matrix: sp.csr_matrix
+) -> None:
     """The read both `to_array` and `add_axis` needed, rather than each reaching past the reader."""
     path = SparseArray.from_matrix(matrix).write(tmp_path / "whole.zarr")
     with open_array(path) as store:
