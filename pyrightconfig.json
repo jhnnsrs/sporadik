@@ -1,3 +1,13 @@
+// Stricter than the shared standard, and the repo's own: inside sporadik/ every
+// rule basedpyright's `strict` mode turns on is on, except the ones this package
+// turned off before the standard (below). It is spelled out as an execution
+// environment because a `strict` path list would force those back on; extraPaths
+// keeps the package's own imports resolving from the repo, not site-packages.
+// tests/ stays on the shared `standard` mode.
+//
+// Off: reportUnknownMemberType/ArgumentType/VariableType/ParameterType and
+// reportMissingTypeStubs. zarr's group and array types differ across its 3.x line
+// and values that come back through them are Unknown whatever sporadik annotates.
 {
   "extends": "./pyright.shared.json",
   "include": [
@@ -10,5 +20,47 @@
     ".venv",
     "build",
     "dist"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "sporadik",
+      "extraPaths": [
+        "."
+      ],
+      "strictListInference": true,
+      "strictSetInference": true,
+      "strictDictionaryInference": true,
+      "reportUnusedImport": "error",
+      "reportUnusedClass": "error",
+      "reportUnusedFunction": "error",
+      "reportUnusedVariable": "error",
+      "reportDuplicateImport": "error",
+      "reportWildcardImportFromLibrary": "error",
+      "reportUntypedFunctionDecorator": "error",
+      "reportUntypedClassDecorator": "error",
+      "reportUntypedBaseClass": "error",
+      "reportUntypedNamedTuple": "error",
+      "reportPrivateUsage": "error",
+      "reportTypeCommentUsage": "error",
+      "reportConstantRedefinition": "error",
+      "reportDeprecated": "error",
+      "reportInconsistentConstructor": "error",
+      "reportInvalidStringEscapeSequence": "error",
+      "reportUnknownLambdaType": "error",
+      "reportMissingParameterType": "error",
+      "reportMissingTypeArgument": "error",
+      "reportInvalidTypeVarUse": "error",
+      "reportUnnecessaryIsInstance": "error",
+      "reportUnnecessaryCast": "error",
+      "reportUnnecessaryComparison": "error",
+      "reportUnnecessaryContains": "error",
+      "reportAssertAlwaysTrue": "error",
+      "reportSelfClsParameterName": "error",
+      "reportInvalidStubStatement": "error",
+      "reportIncompleteStub": "error",
+      "reportUnsupportedDunderAll": "error",
+      "reportUnusedExpression": "error",
+      "reportMatchNotExhaustive": "error"
+    }
   ]
 }
