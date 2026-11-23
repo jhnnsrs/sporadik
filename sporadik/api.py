@@ -35,7 +35,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import Any, Literal, Self
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -674,6 +674,9 @@ def as_sparse_array(
     )
 
 
+_SparseStoreT = TypeVar("_SparseStoreT", bound="SparseStore")
+
+
 class SparseStore:
     """A store opened from a prefix: what it says about itself, and one reader per axis.
 
@@ -865,7 +868,7 @@ class SparseStore:
             reader.close()
         self._readers.clear()
 
-    def __enter__(self) -> Self:
+    def __enter__(self: _SparseStoreT) -> _SparseStoreT:
         """Enter a ``with`` block; the store is already open."""
         return self
 
