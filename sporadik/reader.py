@@ -39,7 +39,16 @@ from sporadik.spec import (
     raveled_shape,
 )
 
-__all__ = ["Selection", "SliceInfo", "SparseReader", "StoreInfo", "ZarrNode", "describe", "open_store", "read_layout"]
+__all__ = [
+    "Selection",
+    "SliceInfo",
+    "SparseReader",
+    "StoreInfo",
+    "ZarrNode",
+    "describe",
+    "open_store",
+    "read_layout",
+]
 
 #: An open zarr node -- a group or an array. `Any` on purpose: sporadik only ever calls the few
 #: methods the two share, and zarr's 3.x line types them differently enough that annotating the
@@ -150,12 +159,16 @@ def _is_byte_addressable(array: ZarrNode) -> bool:
     return not array.compressors and tuple(array.chunks) == tuple(array.shape)
 
 
-def _describe_layout(group: ZarrNode, entry: dict[str, Any], shape: tuple[int, ...]) -> SliceInfo:
+def _describe_layout(
+    group: ZarrNode, entry: dict[str, Any], shape: tuple[int, ...]
+) -> SliceInfo:
     """Read one layout, refusing anything that contradicts itself or the store around it."""
     path = str(entry.get("path"))
     indexed_axis = entry.get("indexed_axis")
     if not isinstance(indexed_axis, int) or not 0 <= indexed_axis < len(shape):
-        raise LayoutError(f"Layout '{path}' declares indexed_axis {indexed_axis!r}, which is not an axis of {shape}")
+        raise LayoutError(
+            f"Layout '{path}' declares indexed_axis {indexed_axis!r}, which is not an axis of {shape}"
+        )
     if path != layout_path(indexed_axis):
         raise LayoutError(
             f"Layout '{path}' compresses axis {indexed_axis}, so it is filed under the wrong name -- it belongs at "
@@ -193,7 +206,9 @@ def _describe_layout(group: ZarrNode, entry: dict[str, Any], shape: tuple[int, .
     present = set(group.array_keys())
     missing = [name for name in ("data", "indices", "indptr") if name not in present]
     if missing:
-        raise LayoutError(f"Layout '{path}' is missing {', '.join(missing)}; a sparse layout holds all three")
+        raise LayoutError(
+            f"Layout '{path}' is missing {', '.join(missing)}; a sparse layout holds all three"
+        )
 
     data, indices, indptr = group["data"], group["indices"], group["indptr"]
     expected = int(shape[indexed_axis]) + 1
@@ -216,8 +231,12 @@ def _describe_layout(group: ZarrNode, entry: dict[str, Any], shape: tuple[int, .
         index_order=order,
         nnz=int(data.shape[0]),
         dtype=str(data.dtype),
-        chunks={name: int(group[name].chunks[0]) for name in ("data", "indices", "indptr")},
-        range_readable=all(_is_byte_addressable(group[name]) for name in ("data", "indices", "indptr")),
+        chunks={
+            name: int(group[name].chunks[0]) for name in ("data", "indices", "indptr")
+        },
+        range_readable=all(
+            _is_byte_addressable(group[name]) for name in ("data", "indices", "indptr")
+        ),
         has_maxima="maxima" in present,
     )
 
@@ -259,7 +278,9 @@ def describe(path: Path | str) -> StoreInfo:
 
     named = block.get("layouts") or []
     if not isinstance(named, list) or not named:
-        raise SporadikError(f"{path} names no layouts, so it holds no array. A store is its layouts.")
+        raise SporadikError(
+            f"{path} names no layouts, so it holds no array. A store is its layouts."
+        )
     if len(named) > len(shape):
         raise SporadikError(
             f"{path} names {len(named)} layouts over a rank-{len(shape)} array, but there is one axis to compress per "
@@ -290,7 +311,9 @@ def describe(path: Path | str) -> StoreInfo:
     return StoreInfo(spec=spec, shape=shape, layouts=layouts)
 
 
-def _coalesce(starts: npt.NDArray[Any], stops: npt.NDArray[Any]) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+def _coalesce(
+    starts: npt.NDArray[Any], stops: npt.NDArray[Any]
+) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
     """Sorted ``[start, stop)`` runs, with touching and overlapping ones merged into one.
 
     **Only exactly adjacent ranges are merged, and that is a decision.** Merging across a *gap*
@@ -318,7 +341,9 @@ def _coalesce(starts: npt.NDArray[Any], stops: npt.NDArray[Any]) -> tuple[npt.ND
     return lo[heads], np.maximum.reduceat(hi, heads)
 
 
-def _ragged_take(base: npt.NDArray[Any], counts: npt.NDArray[Any]) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+def _ragged_take(
+    base: npt.NDArray[Any], counts: npt.NDArray[Any]
+) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
     """The selection's own ``indptr``, and the take-array that gathers it out of what was fetched.
 
     ``base[i]`` is where slice *i*'s run begins in whatever buffer it is being taken from -- an
@@ -331,7 +356,11 @@ def _ragged_take(base: npt.NDArray[Any], counts: npt.NDArray[Any]) -> tuple[npt.
     total = int(indptr[-1])
     if total == 0:
         return indptr, np.empty(0, dtype=np.intp)
-    take = np.arange(total, dtype=np.intp) - np.repeat(indptr[:-1], counts) + np.repeat(base, counts)
+    take = (
+        np.arange(total, dtype=np.intp)
+        - np.repeat(indptr[:-1], counts)
+        + np.repeat(base, counts)
+    )
     return indptr, take.astype(np.intp, copy=False)
 
 
@@ -386,7 +415,9 @@ class Selection:
     def slice_at(self, which: int) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
         """The *which*-th slice of this selection -- by its place in ``positions``, not by position."""
         if not 0 <= which < len(self):
-            raise IndexError(f"{which} is not one of the {len(self)} slices in this selection")
+            raise IndexError(
+                f"{which} is not one of the {len(self)} slices in this selection"
+            )
         low, high = int(self.indptr[which]), int(self.indptr[which + 1])
         return self.indices[low:high], self.data[low:high]
 
@@ -408,7 +439,9 @@ class Selection:
     def to_dense(self) -> npt.NDArray[Any]:
         """The selection scattered into ``(len(self), *index_shape)``, dense over the other axes."""
         rows = np.repeat(np.arange(len(self)), np.diff(np.asarray(self.indptr)))
-        dense = np.zeros((len(self), int(np.prod(self.index_shape))), dtype=self.data.dtype)
+        dense = np.zeros(
+            (len(self), int(np.prod(self.index_shape))), dtype=self.data.dtype
+        )
         dense[rows, np.asarray(self.indices)] = self.data
         return dense.reshape(len(self), *self.index_shape)
 
@@ -421,9 +454,16 @@ class Selection:
         :func:`~sporadik.layout_over`, so the result is refused here if it would not have been a
         layout.
         """
-        shape = tuple(len(self) if axis == self.indexed_axis else size for axis, size in enumerate(self.shape))
+        shape = tuple(
+            len(self) if axis == self.indexed_axis else size
+            for axis, size in enumerate(self.shape)
+        )
         return layout_over(
-            shape, self.indexed_axis, data=self.data, indices=self.indices, indptr=self.indptr,
+            shape,
+            self.indexed_axis,
+            data=self.data,
+            indices=self.indices,
+            indptr=self.indptr,
             index_order=self.index_order,
         )
 
@@ -467,7 +507,9 @@ class SparseReader:
             )
         return next(iter(self.store.layouts.values()))
 
-    def _read_ranges(self, wanted: Sequence[tuple[str, int, int]]) -> list[npt.NDArray[Any]]:
+    def _read_ranges(
+        self, wanted: Sequence[tuple[str, int, int]]
+    ) -> list[npt.NDArray[Any]]:
         """Elements ``[start:stop)`` of each named array, in **one** request to the store.
 
         The plural is the point. ``get_partial_values`` has always taken a list of (key, range)
@@ -534,7 +576,9 @@ class SparseReader:
     def bounds_at(self, position: int) -> tuple[int, int]:
         """The two ``indptr`` entries bracketing one slice: where it starts and ends."""
         if self._closed:
-            raise SporadikError(f"This reader over {self.path} is closed; open another to read from it again.")
+            raise SporadikError(
+                f"This reader over {self.path} is closed; open another to read from it again."
+            )
         if not 0 <= position < self.info.slices:
             raise IndexError(
                 f"{position} is not a position along axis {self.info.indexed_axis} of {self.info.shape}, which this "
@@ -559,14 +603,20 @@ class SparseReader:
         """
         low, high = self.bounds_at(position)
         if self.info.range_readable:
-            indices, data = self._read_ranges([("indices", low, high), ("data", low, high)])
+            indices, data = self._read_ranges(
+                [("indices", low, high), ("data", low, high)]
+            )
             return indices, data
         return self._group["indices"][low:high], self._group["data"][low:high]
 
-    def _edges_at(self, positions: npt.NDArray[Any]) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+    def _edges_at(
+        self, positions: npt.NDArray[Any]
+    ) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
         """The ``indptr`` bracket of every position, in one wave rather than one per position."""
         if self._closed:
-            raise SporadikError(f"This reader over {self.path} is closed; open another to read from it again.")
+            raise SporadikError(
+                f"This reader over {self.path} is closed; open another to read from it again."
+            )
         if self._indptr is not None:
             edges = np.asarray(self._indptr)
             return edges[positions], edges[positions + 1]
@@ -574,7 +624,9 @@ class SparseReader:
         # `_coalesce` folds them into one range. A contiguous batch therefore costs one range here,
         # not one per slice.
         lo, hi = _coalesce(positions, positions + 2)
-        buffers = self._read_ranges([("indptr", int(a), int(b)) for a, b in zip(lo, hi)])
+        buffers = self._read_ranges(
+            [("indptr", int(a), int(b)) for a, b in zip(lo, hi)]
+        )
         edges = np.concatenate(buffers) if buffers else np.empty(0, dtype=np.int64)
         offsets = np.concatenate(([0], np.cumsum(hi - lo)))[:-1]
         which = np.searchsorted(lo, positions, side="right") - 1
@@ -602,7 +654,9 @@ class SparseReader:
         for why that is not a :class:`~sporadik.Layout`.
         """
         wanted = np.asarray(positions, dtype=np.intp).reshape(-1)
-        if wanted.size and (int(wanted.min()) < 0 or int(wanted.max()) >= self.info.slices):
+        if wanted.size and (
+            int(wanted.min()) < 0 or int(wanted.max()) >= self.info.slices
+        ):
             off = int(wanted.min()) if int(wanted.min()) < 0 else int(wanted.max())
             raise IndexError(
                 f"{off} is not a position along axis {self.info.indexed_axis} of {self.info.shape}, which this "
@@ -647,8 +701,13 @@ class SparseReader:
             indices, data = self._group["indices"][take], self._group["data"][take]
 
         return Selection(
-            positions=wanted, indptr=indptr, indices=np.asarray(indices), data=np.asarray(data),
-            shape=self.info.shape, indexed_axis=self.info.indexed_axis, index_order=self.info.index_order,
+            positions=wanted,
+            indptr=indptr,
+            indices=np.asarray(indices),
+            data=np.asarray(data),
+            shape=self.info.shape,
+            indexed_axis=self.info.indexed_axis,
+            index_order=self.info.index_order,
         )
 
     def slices_over(self, start: int, stop: int) -> Selection:
@@ -664,7 +723,9 @@ class SparseReader:
         """
         return self.slices_at(range(start, stop))
 
-    def dense_slices(self, positions: Sequence[int] | npt.NDArray[Any]) -> npt.NDArray[Any]:
+    def dense_slices(
+        self, positions: Sequence[int] | npt.NDArray[Any]
+    ) -> npt.NDArray[Any]:
         """A batch of slices scattered into ``(len(positions), *index_shape)``.
 
         :meth:`dense_slice` for many, and the shape a caller feeding a model a batch wants. Dense
@@ -673,7 +734,9 @@ class SparseReader:
         """
         return self.slices_at(positions).to_dense()
 
-    def coords_at(self, position: int) -> tuple[tuple[npt.NDArray[Any], ...], npt.NDArray[Any]]:
+    def coords_at(
+        self, position: int
+    ) -> tuple[tuple[npt.NDArray[Any], ...], npt.NDArray[Any]]:
         """One slice as one coordinate array per uncompressed axis, plus the values.
 
         The *i*-th array is the coordinate along ``info.index_order[i]``, not along axis *i*. At
@@ -758,7 +821,9 @@ def read_layout(path: Path | str, axis: int | None = None) -> MatrixLike:
     """
     try:
         import scipy.sparse as sp
-    except ModuleNotFoundError as missing:  # pragma: no cover - depends on the environment
+    except (
+        ModuleNotFoundError
+    ) as missing:  # pragma: no cover - depends on the environment
         raise ModuleNotFoundError(
             "read_layout returns a scipy.sparse matrix, so it needs scipy: pip install sporadik[scipy]. Use "
             "open_store() to read slices without it."
@@ -773,4 +838,6 @@ def read_layout(path: Path | str, axis: int | None = None) -> MatrixLike:
         )
     group = _open(path)[info.path]
     builder = sp.csr_matrix if info.encoding == "csr_matrix" else sp.csc_matrix
-    return builder((group["data"][:], group["indices"][:], group["indptr"][:]), shape=info.shape)
+    return builder(
+        (group["data"][:], group["indices"][:], group["indptr"][:]), shape=info.shape
+    )

@@ -93,7 +93,9 @@ def anndata_encoding(rank: int, indexed_axis: int) -> str:
     return "csr_matrix"
 
 
-def raveled_shape(shape: tuple[int, ...], indexed_axis: int, index_order: tuple[int, ...]) -> tuple[int, ...]:
+def raveled_shape(
+    shape: tuple[int, ...], indexed_axis: int, index_order: tuple[int, ...]
+) -> tuple[int, ...]:
     """The shape a layout's own group declares, which is not always the array's.
 
     At rank two it is the array's, so the group is anndata-faithful. Above rank two it is the

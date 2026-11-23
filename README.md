@@ -189,15 +189,17 @@ counts = sp.random(20_000, 1_200, density=0.01, format="csr")
 sporadik.write_store("expression.zarr", [counts, counts.tocsc()])
 
 with sporadik.open_store("expression.zarr", axis=1) as feature_major:
-    positions, values = feature_major.slice_at(7)      # two reads, nothing else fetched
+    positions, values = feature_major.slice_at(7)  # two reads, nothing else fetched
 ```
 
 Above rank two, build a layout per axis and unravel what comes back:
 
 ```python
-layout = sporadik.layout_over(shape, axis, data=..., indices=..., indptr=..., index_order=(0, 2))
+layout = sporadik.layout_over(
+    shape, axis, data=..., indices=..., indptr=..., index_order=(0, 2)
+)
 with sporadik.open_store(path, axis=1) as reader:
-    (a, c), values = reader.coords_at(7)               # through index_order, not axis order
+    (a, c), values = reader.coords_at(7)  # through index_order, not axis order
 ```
 
 ### The convenience layer
@@ -208,12 +210,16 @@ reader per axis. Nothing here is normative — it builds the same layouts by the
 a caller that already holds its own is unaffected.
 
 ```python
-array = sporadik.SparseArray.from_matrix(counts)       # both layouts, from one matrix
-array = sporadik.SparseArray.from_coords(shape, (cells, metabolites, adducts), intensity)
-array.write("expression.zarr")                         # one layout per axis
+array = sporadik.SparseArray.from_matrix(counts)  # both layouts, from one matrix
+array = sporadik.SparseArray.from_coords(
+    shape, (cells, metabolites, adducts), intensity
+)
+array.write("expression.zarr")  # one layout per axis
 
 with sporadik.open_array("expression.zarr") as store:
-    positions, values = store.slice_at(7, axis=1)      # the axis is still named, never defaulted
+    positions, values = store.slice_at(
+        7, axis=1
+    )  # the axis is still named, never defaulted
 ```
 
 ### Reading many slices
@@ -224,9 +230,11 @@ batch in **two waves whatever its size** — one for the `indptr` brackets, one 
 
 ```python
 with sporadik.open_array("expression.zarr") as store:
-    selection = store.slices_at(cell_ids, axis=0)      # two waves, whatever len(cell_ids) is
-    selection = store.slices_over(10, 40, axis=0)      # contiguous: already one byte range
-    batch = store.dense_slices(cell_ids, axis=0)       # dense over the uncompressed axes
+    selection = store.slices_at(
+        cell_ids, axis=0
+    )  # two waves, whatever len(cell_ids) is
+    selection = store.slices_over(10, 40, axis=0)  # contiguous: already one byte range
+    batch = store.dense_slices(cell_ids, axis=0)  # dense over the uncompressed axes
 ```
 
 Two rather than one is the floor, not an implementation limit: the second wave's byte ranges are

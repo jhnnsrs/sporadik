@@ -46,7 +46,9 @@ ROWS, COLS, DENSITY = 400, 90, 0.05
 @pytest.fixture
 def matrix() -> Any:
     """One reproducible CSC matrix. Objects on axis 0, features on axis 1."""
-    return sp.random(ROWS, COLS, density=DENSITY, format="csc", dtype=np.float32, random_state=0)
+    return sp.random(
+        ROWS, COLS, density=DENSITY, format="csc", dtype=np.float32, random_state=0
+    )
 
 
 @pytest.fixture
@@ -99,7 +101,9 @@ def test_each_layout_is_a_plain_anndata_group(both: Path) -> None:
     what anndata means by a `csc_matrix`, and being a real one is the whole interop claim.
     """
     for axis, encoding in ((0, "csr_matrix"), (1, "csc_matrix")):
-        attrs = json.loads((both / LAYOUTS_GROUP / f"axis{axis}" / "zarr.json").read_text())["attributes"]
+        attrs = json.loads(
+            (both / LAYOUTS_GROUP / f"axis{axis}" / "zarr.json").read_text()
+        )["attributes"]
         assert attrs["encoding-type"] == encoding
         assert attrs["encoding-version"] == "0.1.0"
         assert attrs["shape"] == [ROWS, COLS]
@@ -117,10 +121,14 @@ def test_anndata_reads_a_layout_unchanged(both: Path, matrix: Any) -> None:
         group = zarr.open_group(str(both), mode="r")[f"{LAYOUTS_GROUP}/axis{axis}"]
         back = anndata_io.read_elem(group)
         assert back.shape == (ROWS, COLS)
-        assert (back != matrix).nnz == 0, f"axis{axis} must be the matrix, not its transpose"
+        assert (back != matrix).nnz == 0, (
+            f"axis{axis} must be the matrix, not its transpose"
+        )
 
 
-def test_every_array_is_chunked_at_the_request_granularity(both: Path, matrix: Any) -> None:
+def test_every_array_is_chunked_at_the_request_granularity(
+    both: Path, matrix: Any
+) -> None:
     """Chunked and compressed, sized for one S3 request -- including `indptr`.
 
     `indptr` matters most and is the thing that changed: written whole it is 152 KB over 19 059
@@ -128,17 +136,27 @@ def test_every_array_is_chunked_at_the_request_granularity(both: Path, matrix: A
     Chunked, the 128 KB holding those two also serves the next sixteen thousand positions.
     """
     info = describe(both).layouts[1]
-    assert not info.range_readable, "the default trades bytes for cache reuse, so it is not byte-addressable"
+    assert not info.range_readable, (
+        "the default trades bytes for cache reuse, so it is not byte-addressable"
+    )
     for name in ("data", "indices", "indptr"):
-        assert info.chunks[name] == chunk_for(np.dtype(np.float32) if name == "data" else np.int32, info.chunks[name])
+        assert info.chunks[name] == chunk_for(
+            np.dtype(np.float32) if name == "data" else np.int32, info.chunks[name]
+        )
 
-    blobs = [p for p in (both / LAYOUTS_GROUP / "axis1" / "data").rglob("*") if p.is_file() and p.name != "zarr.json"]
+    blobs = [
+        p
+        for p in (both / LAYOUTS_GROUP / "axis1" / "data").rglob("*")
+        if p.is_file() and p.name != "zarr.json"
+    ]
     assert sum(p.stat().st_size for p in blobs) < matrix.data.nbytes, (
         "compressed, because a request pays for bytes but not per byte"
     )
 
 
-def test_a_byte_addressable_store_reads_only_its_own_bytes(tmp_path: Path, matrix: Any) -> None:
+def test_a_byte_addressable_store_reads_only_its_own_bytes(
+    tmp_path: Path, matrix: Any
+) -> None:
     """The other trade, kept because it is the right one for a cold reader that caches nothing.
 
     Counted at the store, which is the only place the claim is real: `slice_at` issues range reads
@@ -171,12 +189,16 @@ def test_a_byte_addressable_store_reads_only_its_own_bytes(tmp_path: Path, matri
     column = matrix.getcol(7)
     wanted = column.nnz * (matrix.data.dtype.itemsize + matrix.indices.dtype.itemsize)
     bracket = 2 * matrix.indptr.dtype.itemsize
-    assert sum(fetched) == wanted + bracket, f"fetched {sum(fetched)} bytes for a {column.nnz}-nonzero slice"
+    assert sum(fetched) == wanted + bracket, (
+        f"fetched {sum(fetched)} bytes for a {column.nnz}-nonzero slice"
+    )
     assert len(values) == column.nnz
     assert np.allclose(reader.dense_slice(7), column.toarray().ravel())
 
 
-def test_both_write_modes_read_back_the_same_values(tmp_path: Path, matrix: Any) -> None:
+def test_both_write_modes_read_back_the_same_values(
+    tmp_path: Path, matrix: Any
+) -> None:
     """The trade is where the bytes go, never what they say."""
     chunked = write_store(tmp_path / "a.zarr", matrix)
     exact = write_store(tmp_path / "b.zarr", matrix, byte_addressable=True)
@@ -270,13 +292,21 @@ def test_a_store_missing_its_chunks_is_refused(tmp_path: Path, matrix: Any) -> N
     it cannot fetch. Nothing raised anywhere.
     """
     store = write_store(tmp_path / "torn.zarr", matrix)
-    chunks = [p for p in (store / LAYOUTS_GROUP / "axis1" / "data").rglob("*") if p.is_file() and p.name != "zarr.json"]
-    assert chunks, "the fixture must have written chunk objects for this test to mean anything"
+    chunks = [
+        p
+        for p in (store / LAYOUTS_GROUP / "axis1" / "data").rglob("*")
+        if p.is_file() and p.name != "zarr.json"
+    ]
+    assert chunks, (
+        "the fixture must have written chunk objects for this test to mean anything"
+    )
     for chunk in chunks:
         chunk.unlink()
 
     # The store still *claims* everything it claimed before: this is why the claim is not enough.
-    assert json.loads((store / LAYOUTS_GROUP / "axis1" / "data" / "zarr.json").read_text())["shape"] == [matrix.nnz]
+    assert json.loads(
+        (store / LAYOUTS_GROUP / "axis1" / "data" / "zarr.json").read_text()
+    )["shape"] == [matrix.nnz]
     _rewrite_block(store, complete=False)
 
     with pytest.raises(ValueError, match="only a finished store is readable"):
@@ -303,15 +333,24 @@ def test_an_unknown_spec_is_refused_rather_than_guessed_at(both: Path) -> None:
 
 def test_a_layout_named_but_absent_is_refused(both: Path) -> None:
     """The block lists what the writer finished; a name with nothing behind it is a torn upload."""
-    _rewrite_block(both, layouts=[
-        {"path": f"{LAYOUTS_GROUP}/axis0", "indexed_axis": 0, "index_order": [1]},
-        {"path": f"{LAYOUTS_GROUP}/nothing_here", "indexed_axis": 1, "index_order": [0]},
-    ])
+    _rewrite_block(
+        both,
+        layouts=[
+            {"path": f"{LAYOUTS_GROUP}/axis0", "indexed_axis": 0, "index_order": [1]},
+            {
+                "path": f"{LAYOUTS_GROUP}/nothing_here",
+                "indexed_axis": 1,
+                "index_order": [0],
+            },
+        ],
+    )
     with pytest.raises(ValueError, match="not in the prefix"):
         describe(both)
 
 
-def test_a_layout_filed_under_the_wrong_name_is_refused(tmp_path: Path, matrix: Any) -> None:
+def test_a_layout_filed_under_the_wrong_name_is_refused(
+    tmp_path: Path, matrix: Any
+) -> None:
     """The path and the group's own `encoding-type` are two statements of one fact.
 
     Worth checking because getting it wrong is silent in the worst way: the store would be read
@@ -319,7 +358,12 @@ def test_a_layout_filed_under_the_wrong_name_is_refused(tmp_path: Path, matrix: 
     """
     store = write_store(tmp_path / "swapped.zarr", matrix)
     (store / LAYOUTS_GROUP / "axis1").rename(store / LAYOUTS_GROUP / "axis0")
-    _rewrite_block(store, layouts=[{"path": f"{LAYOUTS_GROUP}/axis0", "indexed_axis": 1, "index_order": [0]}])
+    _rewrite_block(
+        store,
+        layouts=[
+            {"path": f"{LAYOUTS_GROUP}/axis0", "indexed_axis": 1, "index_order": [0]}
+        ],
+    )
 
     with pytest.raises(ValueError, match="filed under the wrong name"):
         describe(store)
@@ -373,11 +417,16 @@ def test_maxima_matches_a_dense_reduction(both: Path, matrix: Any) -> None:
 
 def test_a_position_off_the_end_is_an_index_error(both: Path) -> None:
     """Named against the indexed axis, since that is the one the reader is talking about."""
-    with open_store(both, 1) as reader, pytest.raises(IndexError, match=f"{COLS} slices"):
+    with (
+        open_store(both, 1) as reader,
+        pytest.raises(IndexError, match=f"{COLS} slices"),
+    ):
         reader.slice_at(COLS)
 
 
-def test_reading_a_layout_the_store_does_not_hold_is_refused(tmp_path: Path, matrix: Any) -> None:
+def test_reading_a_layout_the_store_does_not_hold_is_refused(
+    tmp_path: Path, matrix: Any
+) -> None:
     """Not a slower read -- a scan of every byte, which is why it is refused instead."""
     store = write_store(tmp_path / "csc_only.zarr", matrix)
     with pytest.raises(ValueError, match="scan of every byte"):
@@ -390,11 +439,16 @@ def test_two_layouts_make_the_choice_explicit(both: Path) -> None:
         SparseReader(both)
 
 
-def test_a_layout_built_from_raw_arrays_needs_no_scipy(tmp_path: Path, matrix: Any) -> None:
+def test_a_layout_built_from_raw_arrays_needs_no_scipy(
+    tmp_path: Path, matrix: Any
+) -> None:
     """`scipy` is not a dependency of this package, and the writer's input says so."""
     layout = layout_over(
-        (ROWS, COLS), 1,
-        data=np.asarray(matrix.data), indices=np.asarray(matrix.indices), indptr=np.asarray(matrix.indptr),
+        (ROWS, COLS),
+        1,
+        data=np.asarray(matrix.data),
+        indices=np.asarray(matrix.indices),
+        indptr=np.asarray(matrix.indptr),
     )
     store = write_store(tmp_path / "raw.zarr", layout)
     assert describe(store).layouts[1].nnz == matrix.nnz
@@ -424,19 +478,32 @@ def _layout_from_dense(dense: np.ndarray, indexed_axis: int) -> Any:
     the fixture gets there.
     """
     order = tuple(axis for axis in range(dense.ndim) if axis != indexed_axis)
-    flat = sp.csr_matrix(np.transpose(dense, (indexed_axis, *order)).reshape(dense.shape[indexed_axis], -1))
+    flat = sp.csr_matrix(
+        np.transpose(dense, (indexed_axis, *order)).reshape(
+            dense.shape[indexed_axis], -1
+        )
+    )
     return layout_over(
-        dense.shape, indexed_axis, data=flat.data, indices=flat.indices, indptr=flat.indptr, index_order=order
+        dense.shape,
+        indexed_axis,
+        data=flat.data,
+        indices=flat.indices,
+        indptr=flat.indptr,
+        index_order=order,
     )
 
 
 @pytest.fixture
 def cube_store(tmp_path: Path, cube: np.ndarray) -> Path:
     """A rank-three store compressed along every one of its axes -- all three questions."""
-    return write_store(tmp_path / "cube.zarr", [_layout_from_dense(cube, axis) for axis in range(3)])
+    return write_store(
+        tmp_path / "cube.zarr", [_layout_from_dense(cube, axis) for axis in range(3)]
+    )
 
 
-def test_a_rank_three_store_answers_along_every_axis(cube_store: Path, cube: np.ndarray) -> None:
+def test_a_rank_three_store_answers_along_every_axis(
+    cube_store: Path, cube: np.ndarray
+) -> None:
     """The point of the generalisation: one layout per axis something selects along.
 
     A (object, feature, timepoint) matrix answers "this object", "this feature" and "this
@@ -450,10 +517,14 @@ def test_a_rank_three_store_answers_along_every_axis(cube_store: Path, cube: np.
         with open_store(cube_store, axis) as reader:
             assert reader.info.slices == CUBE[axis]
             for position in (0, CUBE[axis] - 1):
-                assert np.allclose(reader.dense_slice(position), np.take(cube, position, axis=axis))
+                assert np.allclose(
+                    reader.dense_slice(position), np.take(cube, position, axis=axis)
+                )
 
 
-def test_a_rank_three_slice_unravels_to_real_coordinates(cube_store: Path, cube: np.ndarray) -> None:
+def test_a_rank_three_slice_unravels_to_real_coordinates(
+    cube_store: Path, cube: np.ndarray
+) -> None:
     """`indices` is raveled over the other axes, so a position means nothing without the order."""
     with open_store(cube_store, 1) as reader:
         coords, values = reader.coords_at(2)
@@ -468,22 +539,30 @@ def test_the_indptr_invariant_holds_at_every_rank(cube_store: Path) -> None:
         assert info.chunks["indptr"] == CUBE[axis] + 1
 
 
-def test_a_rank_three_layout_declares_the_raveled_shape_it_holds(cube_store: Path) -> None:
+def test_a_rank_three_layout_declares_the_raveled_shape_it_holds(
+    cube_store: Path,
+) -> None:
     """Above rank two the child is a genuine csr over the raveled view, and says so.
 
     Not a lie about the data: what the group holds really is that two-axis matrix. The real
     shape lives in the block, which is the only thing that knows the array was ever rank three.
     """
-    attrs = json.loads((cube_store / LAYOUTS_GROUP / "axis1" / "zarr.json").read_text())["attributes"]
+    attrs = json.loads(
+        (cube_store / LAYOUTS_GROUP / "axis1" / "zarr.json").read_text()
+    )["attributes"]
     assert attrs["encoding-type"] == "csr_matrix"
     assert attrs["shape"] == [CUBE[1], CUBE[0] * CUBE[2]]
     assert _block(cube_store)["shape"] == list(CUBE)
 
 
-def test_anndata_reads_a_rank_three_layout_as_its_raveled_view(cube_store: Path, cube: np.ndarray) -> None:
+def test_anndata_reads_a_rank_three_layout_as_its_raveled_view(
+    cube_store: Path, cube: np.ndarray
+) -> None:
     """Interop degrades honestly rather than breaking: anndata gets the matrix that is there."""
     anndata_io = pytest.importorskip("anndata.io")
-    back = anndata_io.read_elem(zarr.open_group(str(cube_store), mode="r")[f"{LAYOUTS_GROUP}/axis0"])
+    back = anndata_io.read_elem(
+        zarr.open_group(str(cube_store), mode="r")[f"{LAYOUTS_GROUP}/axis0"]
+    )
     assert back.shape == (CUBE[0], CUBE[1] * CUBE[2])
     assert np.allclose(back.toarray(), cube.reshape(CUBE[0], -1))
 
@@ -498,7 +577,14 @@ def test_an_index_order_that_is_not_a_permutation_is_refused(cube: np.ndarray) -
     """The one fact in the format that cannot be recovered from the bytes, so it is checked."""
     layout = _layout_from_dense(cube, 1)
     with pytest.raises(ValueError, match="permutation"):
-        layout_over(cube.shape, 1, data=layout.data, indices=layout.indices, indptr=layout.indptr, index_order=(0, 1))
+        layout_over(
+            cube.shape,
+            1,
+            data=layout.data,
+            indices=layout.indices,
+            indptr=layout.indptr,
+            index_order=(0, 1),
+        )
 
 
 def test_a_wrong_index_order_in_the_block_is_refused(cube_store: Path) -> None:
@@ -543,7 +629,12 @@ def _count_range_calls(reader: SparseReader) -> tuple[list[list[int]], Any]:
 
     async def counting(prototype: Any, key_ranges: Any) -> Any:
         pairs = list(key_ranges)
-        calls.append([getattr(request, "end", 0) - getattr(request, "start", 0) for _, request in pairs])
+        calls.append(
+            [
+                getattr(request, "end", 0) - getattr(request, "start", 0)
+                for _, request in pairs
+            ]
+        )
         return await original(prototype, pairs)
 
     store.get_partial_values = counting
@@ -567,7 +658,9 @@ def _count_chunk_gets(reader: SparseReader) -> tuple[list[str], Any]:
 @pytest.fixture
 def exact(tmp_path: Path, matrix: Any) -> Path:
     """Both layouts, written byte-addressably -- the variant whose reads are range reads."""
-    return write_store(tmp_path / "exact.zarr", [matrix, matrix.tocsr()], byte_addressable=True)
+    return write_store(
+        tmp_path / "exact.zarr", [matrix, matrix.tocsr()], byte_addressable=True
+    )
 
 
 def test_one_slice_costs_two_round_trips_rather_than_three(exact: Path) -> None:
@@ -609,7 +702,9 @@ def test_a_contiguous_range_of_slices_is_one_range_read(exact: Path) -> None:
         restore()
     assert len(calls) == 2
     assert len(calls[0]) == 1, "overlapping indptr windows fold into one range"
-    assert len(calls[1]) == 2, "one indices range and one data range, not one pair per slice"
+    assert len(calls[1]) == 2, (
+        "one indices range and one data range, not one pair per slice"
+    )
     low, _ = reader.bounds_at(10)
     _, high = reader.bounds_at(39)
     assert calls[1][0] == (high - low) * reader._group["indices"].dtype.itemsize
@@ -640,7 +735,9 @@ def test_a_batch_on_a_chunked_store_fetches_each_chunk_once(both: Path) -> None:
     assert len(batched) < len(one_at_a_time)
 
 
-def test_a_batch_of_one_costs_what_a_single_slice_costs(both: Path, exact: Path) -> None:
+def test_a_batch_of_one_costs_what_a_single_slice_costs(
+    both: Path, exact: Path
+) -> None:
     """The one-run dispatch, pinned.
 
     Without it a batch of one is a fancy index over a contiguous run -- an eight-byte offset per
@@ -672,7 +769,9 @@ def test_a_batch_of_one_costs_what_a_single_slice_costs(both: Path, exact: Path)
 
 
 @pytest.mark.parametrize("axis", [0, 1])
-def test_batched_and_one_at_a_time_read_the_same_values(both: Path, exact: Path, axis: int) -> None:
+def test_batched_and_one_at_a_time_read_the_same_values(
+    both: Path, exact: Path, axis: int
+) -> None:
     """However few times we waited, the bytes are the ones reading them singly would have given."""
     for path in (both, exact):
         reader = SparseReader(path, axis)
@@ -692,7 +791,9 @@ def test_slices_come_back_in_the_order_they_were_asked_for(both: Path) -> None:
     selection = reader.slices_at(descending)
     assert np.array_equal(selection.positions, descending)
     for place, position in enumerate(descending):
-        assert np.array_equal(selection.slice_at(place)[1], reader.slice_at(int(position))[1])
+        assert np.array_equal(
+            selection.slice_at(place)[1], reader.slice_at(int(position))[1]
+        )
 
 
 def test_a_repeated_position_is_read_once_and_returned_twice(exact: Path) -> None:
@@ -725,7 +826,9 @@ def test_a_position_off_the_end_is_an_index_error_in_a_batch_too(both: Path) -> 
         reader.slices_at([0, reader.info.slices])
 
 
-def test_a_selection_unravels_to_coordinates_in_the_original_frame(both: Path, matrix: Any) -> None:
+def test_a_selection_unravels_to_coordinates_in_the_original_frame(
+    both: Path, matrix: Any
+) -> None:
     """Row *i* is ``positions[i]``, and `coords` is what says so.
 
     This is the trap the type exists for: a caller who reads a coordinate straight off the
@@ -739,12 +842,16 @@ def test_a_selection_unravels_to_coordinates_in_the_original_frame(both: Path, m
     assert np.allclose(dense[coords[0], coords[1]], values)
 
 
-def test_a_selection_can_be_written_as_a_store_of_its_own(tmp_path: Path, both: Path, matrix: Any) -> None:
+def test_a_selection_can_be_written_as_a_store_of_its_own(
+    tmp_path: Path, both: Path, matrix: Any
+) -> None:
     """`as_layout` is the caller saying the selection *is* the array now -- and then it writes."""
     selection = SparseReader(both, 1).slices_over(10, 40)
     written = write_store(tmp_path / "subset.zarr", selection.as_layout())
     assert describe(written).shape == (matrix.shape[0], 30)
-    assert np.allclose(read_layout(written, 1).toarray(), matrix.tocsc()[:, 10:40].toarray())
+    assert np.allclose(
+        read_layout(written, 1).toarray(), matrix.tocsc()[:, 10:40].toarray()
+    )
 
 
 def test_dense_slices_is_dense_slice_stacked(both: Path) -> None:
@@ -752,7 +859,8 @@ def test_dense_slices_is_dense_slice_stacked(both: Path) -> None:
     reader = SparseReader(both, 1)
     positions = [5, 1, 5]
     assert np.allclose(
-        reader.dense_slices(positions), np.stack([reader.dense_slice(position) for position in positions])
+        reader.dense_slices(positions),
+        np.stack([reader.dense_slice(position) for position in positions]),
     )
 
 
@@ -788,7 +896,9 @@ def test_reading_from_a_worker_thread_inside_an_event_loop_works(exact: Path) ->
     assert len(selection) == 2
 
 
-def test_stored_maxima_match_the_reduction_they_replace(both: Path, matrix: Any) -> None:
+def test_stored_maxima_match_the_reduction_they_replace(
+    both: Path, matrix: Any
+) -> None:
     """The writer now does what this module's own advice always said to do at ingest."""
     reader = SparseReader(both, 1)
     assert describe(both).layouts[1].has_maxima
@@ -826,7 +936,9 @@ def test_the_block_says_nothing_about_maxima(both: Path) -> None:
     assert "maxima" not in json.dumps(block)
 
 
-def test_a_closed_reader_says_so_rather_than_indexing_an_empty_cache(both: Path) -> None:
+def test_a_closed_reader_says_so_rather_than_indexing_an_empty_cache(
+    both: Path,
+) -> None:
     """`close()` empties the cached `indptr`; without a flag the next read was numpy's IndexError."""
     from sporadik import SporadikError
 

@@ -43,7 +43,14 @@ import zarr
 
 from sporadik.errors import LayoutError, SporadikError
 from sporadik.layout import Layout, MatrixLike, layout_of, layout_over, layouts_of
-from sporadik.reader import Selection, SparseReader, StoreInfo, ZarrNode, describe, read_layout
+from sporadik.reader import (
+    Selection,
+    SparseReader,
+    StoreInfo,
+    ZarrNode,
+    describe,
+    read_layout,
+)
 from sporadik.spec import BLOCK_KEY, ENCODINGS, LAYOUTS_GROUP, MIN_RANK, block_for
 from sporadik.writer import write_layout_into, write_store, write_store_into
 
@@ -61,7 +68,6 @@ Duplicates = Literal["sum", "refuse"]
 #: sends one into the matrix branch to fail there about a missing ``.data``. A `scipy.sparse` matrix
 #: is what carries a format *and* knows how to become a compressed one, COO and LIL included.
 _MATRIX_ATTRS = ("format", "tocsr", "shape")
-
 
 
 def _index_dtype(largest: int, nnz: int) -> npt.DTypeLike:
@@ -111,7 +117,9 @@ def _compress(
         indices = indices[starts]
         positions = positions[starts]
 
-    counts = np.bincount(positions.astype(np.intp, copy=False), minlength=shape[indexed_axis])
+    counts = np.bincount(
+        positions.astype(np.intp, copy=False), minlength=shape[indexed_axis]
+    )
     indptr = np.concatenate(([0], np.cumsum(counts)))
     width = _index_dtype(int(np.prod(index_shape)), len(data))
     return layout_over(
@@ -136,10 +144,14 @@ def _wanted(shape: tuple[int, ...], axes: Sequence[int] | None) -> tuple[int, ..
         return tuple(range(len(shape)))
     wanted = tuple(int(axis) for axis in axes)
     if not wanted:
-        raise LayoutError("A sparse store is its layouts; there is no state in which one exists and holds none.")
+        raise LayoutError(
+            "A sparse store is its layouts; there is no state in which one exists and holds none."
+        )
     for axis in wanted:
         if not 0 <= axis < len(shape):
-            raise LayoutError(f"axis {axis} is not an axis of shape {shape}, so nothing could compress along it")
+            raise LayoutError(
+                f"axis {axis} is not an axis of shape {shape}, so nothing could compress along it"
+            )
     return wanted
 
 
@@ -156,7 +168,9 @@ def _only(built: dict[int, Layout], axes: Sequence[int] | None) -> dict[int, Lay
         return built
     wanted = tuple(int(axis) for axis in axes)
     if not wanted:
-        raise LayoutError("A sparse store is its layouts; there is no state in which one exists and holds none.")
+        raise LayoutError(
+            "A sparse store is its layouts; there is no state in which one exists and holds none."
+        )
     for axis in wanted:
         if axis not in built:
             raise LayoutError(
@@ -217,7 +231,9 @@ class SparseArray:
         Re-keying is part of it: a layout filed under an axis it does not compress ends up under the
         one it does, because :func:`layouts_of` keys by what the arrays actually say.
         """
-        object.__setattr__(self, "layouts", MappingProxyType(layouts_of(list(self.layouts.values()))))
+        object.__setattr__(
+            self, "layouts", MappingProxyType(layouts_of(list(self.layouts.values())))
+        )
 
     def __eq__(self, other: object) -> bool:
         """The same axes holding the same layouts. See :meth:`Layout.__eq__` for why by hand."""
@@ -234,7 +250,9 @@ class SparseArray:
     # ------------------------------------------------------------------ converters
 
     @classmethod
-    def from_layouts(cls, layouts: MatrixLike, *, axes: Sequence[int] | None = None) -> SparseArray:
+    def from_layouts(
+        cls, layouts: MatrixLike, *, axes: Sequence[int] | None = None
+    ) -> SparseArray:
         """From layouts that are already built: one, or any iterable of them.
 
         ``axes`` selects among them rather than building any: these are already compressed, and an
@@ -245,7 +263,9 @@ class SparseArray:
         return cls(_only(built, axes))
 
     @classmethod
-    def from_matrices(cls, matrices: MatrixLike, *, axes: Sequence[int] | None = None) -> SparseArray:
+    def from_matrices(
+        cls, matrices: MatrixLike, *, axes: Sequence[int] | None = None
+    ) -> SparseArray:
         """From the matrices as they are, adding nothing.
 
         The literal form of what callers wrote before this class existed -- ``[counts,
@@ -258,7 +278,11 @@ class SparseArray:
 
     @classmethod
     def from_matrix(
-        cls, matrix: MatrixLike, *, axes: Sequence[int] | None = None, duplicates: Duplicates = "sum"
+        cls,
+        matrix: MatrixLike,
+        *,
+        axes: Sequence[int] | None = None,
+        duplicates: Duplicates = "sum",
     ) -> SparseArray:
         """From one `scipy` CSR or CSC matrix, re-compressed along every axis asked for.
 
@@ -282,10 +306,17 @@ class SparseArray:
         ``.tocsr()``, which sums them silently -- and silently summed duplicates are
         indistinguishable from larger values.
         """
-        if duplicates == "refuse" and str(getattr(matrix, "format", "")) not in ("csr", "csc"):
+        if duplicates == "refuse" and str(getattr(matrix, "format", "")) not in (
+            "csr",
+            "csc",
+        ):
             coo = matrix.tocoo()
             return cls.from_coords(
-                tuple(int(size) for size in coo.shape), (coo.row, coo.col), coo.data, axes=axes, duplicates="refuse"
+                tuple(int(size) for size in coo.shape),
+                (coo.row, coo.col),
+                coo.data,
+                axes=axes,
+                duplicates="refuse",
             )
         base = layout_of(_as_compressed(matrix))
         wanted = _wanted(base.shape, axes)
@@ -321,7 +352,9 @@ class SparseArray:
         """
         shape = tuple(int(size) for size in shape)
         if len(shape) < MIN_RANK:
-            raise LayoutError(f"a sparse array has at least {MIN_RANK} axes, but shape is {shape}")
+            raise LayoutError(
+                f"a sparse array has at least {MIN_RANK} axes, but shape is {shape}"
+            )
         if len(coords) != len(shape):
             raise LayoutError(
                 f"`coords` holds {len(coords)} coordinate arrays for a shape of {len(shape)} axes. There is one per "
@@ -343,16 +376,29 @@ class SparseArray:
             # not caught at all: `np.bincount(..., minlength=)` returns a longer array, and the
             # result is a SparseArray whose `shape` lies, refused much later by `validate_layout`
             # with a message about `indptr` length that says nothing about the coordinate.
-            if coordinate.size and (int(coordinate.min()) < 0 or int(coordinate.max()) >= shape[axis]):
-                offender = int(coordinate.min()) if int(coordinate.min()) < 0 else int(coordinate.max())
+            if coordinate.size and (
+                int(coordinate.min()) < 0 or int(coordinate.max()) >= shape[axis]
+            ):
+                offender = (
+                    int(coordinate.min())
+                    if int(coordinate.min()) < 0
+                    else int(coordinate.max())
+                )
                 raise LayoutError(
                     f"the coordinates along axis {axis} include {offender}, which is not a position along an axis of "
                     f"{shape[axis]}. Every coordinate names a cell of the array it declares."
                 )
-        return cls({axis: _compress(shape, prepared, values, axis, duplicates) for axis in _wanted(shape, axes)})
+        return cls(
+            {
+                axis: _compress(shape, prepared, values, axis, duplicates)
+                for axis in _wanted(shape, axes)
+            }
+        )
 
     @classmethod
-    def from_dense(cls, array: npt.NDArray[Any], *, axes: Sequence[int] | None = None) -> SparseArray:
+    def from_dense(
+        cls, array: npt.NDArray[Any], *, axes: Sequence[int] | None = None
+    ) -> SparseArray:
         """From an ordinary dense array, keeping the cells that are not zero.
 
         The package's own test suite builds its rank-three fixtures this way and its helper says,
@@ -366,10 +412,14 @@ class SparseArray:
         """
         array = np.asarray(array)
         coords = np.nonzero(array)
-        return cls.from_coords(array.shape, coords, array[coords], axes=axes, duplicates="refuse")
+        return cls.from_coords(
+            array.shape, coords, array[coords], axes=axes, duplicates="refuse"
+        )
 
     @classmethod
-    def from_anndata(cls, source: MatrixLike, *, axes: Sequence[int] | None = None) -> SparseArray:
+    def from_anndata(
+        cls, source: MatrixLike, *, axes: Sequence[int] | None = None
+    ) -> SparseArray:
         """From an anndata ``X``: an `AnnData`, a zarr or HDF5 group holding one, or the group itself.
 
         A layout *is* anndata's spelling -- ``data``, ``indices``, ``indptr`` and an
@@ -453,9 +503,16 @@ class SparseArray:
         if axis in self.layouts:
             return self
         if not 0 <= axis < self.rank:
-            raise LayoutError(f"axis {axis} is not an axis of shape {self.shape}, so nothing could compress along it")
+            raise LayoutError(
+                f"axis {axis} is not an axis of shape {self.shape}, so nothing could compress along it"
+            )
         coords, values = self.to_coords()
-        return SparseArray({**self.layouts, axis: _compress(self.shape, coords, values, axis, "refuse")})
+        return SparseArray(
+            {
+                **self.layouts,
+                axis: _compress(self.shape, coords, values, axis, "refuse"),
+            }
+        )
 
     def to_coords(self) -> tuple[tuple[npt.NDArray[Any], ...], npt.NDArray[Any]]:
         """Back to coordinates and values: one array per axis, plus the values, in axis order.
@@ -492,7 +549,9 @@ class SparseArray:
         """One layout as a `scipy.sparse` matrix. Rank two only, because scipy has nothing above it."""
         try:
             import scipy.sparse as sp
-        except ModuleNotFoundError as missing:  # pragma: no cover - depends on the environment
+        except (
+            ModuleNotFoundError
+        ) as missing:  # pragma: no cover - depends on the environment
             raise ModuleNotFoundError(
                 "to_scipy returns a scipy.sparse matrix, so it needs scipy: pip install sporadik[scipy]. The layouts "
                 "themselves are plain numpy arrays and need nothing."
@@ -522,13 +581,27 @@ class SparseArray:
 
     # ------------------------------------------------------------------ what it does
 
-    def write(self, path: Path | str, *, chunk: int | None = None, byte_addressable: bool = False) -> Path:
+    def write(
+        self,
+        path: Path | str,
+        *,
+        chunk: int | None = None,
+        byte_addressable: bool = False,
+    ) -> Path:
         """Write these layouts as a sparse store at ``path``."""
         return write_store(path, self, chunk=chunk, byte_addressable=byte_addressable)
 
-    def write_into(self, group: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False) -> MatrixLike:
+    def write_into(
+        self,
+        group: MatrixLike,
+        *,
+        chunk: int | None = None,
+        byte_addressable: bool = False,
+    ) -> MatrixLike:
         """Write these layouts into an already-opened zarr group, and return it."""
-        return write_store_into(group, self, chunk=chunk, byte_addressable=byte_addressable)
+        return write_store_into(
+            group, self, chunk=chunk, byte_addressable=byte_addressable
+        )
 
 
 def _as_compressed(matrix: MatrixLike) -> MatrixLike:
@@ -558,7 +631,10 @@ def _recompress_with_scipy(matrix: MatrixLike, axis: int) -> MatrixLike | None:
 
 
 def as_sparse_array(
-    source: MatrixLike, *, axes: Sequence[int] | None = None, duplicates: Duplicates = "sum"
+    source: MatrixLike,
+    *,
+    axes: Sequence[int] | None = None,
+    duplicates: Duplicates = "sum",
 ) -> SparseArray:
     """Whatever was passed, as a :class:`SparseArray`.
 
@@ -578,7 +654,9 @@ def as_sparse_array(
     if isinstance(source, SparseArray):
         # Handed straight back when nothing was asked of it, because it is already the answer and
         # callers rely on that identity. `axes` is the one thing that can still narrow it.
-        return source if axes is None else SparseArray(_only(dict(source.layouts), axes))
+        return (
+            source if axes is None else SparseArray(_only(dict(source.layouts), axes))
+        )
     if isinstance(source, Layout):
         return SparseArray.from_layouts(source, axes=axes)
     if isinstance(source, (list, tuple)):
@@ -675,7 +753,9 @@ class SparseStore:
         """The two ``indptr`` entries bracketing one slice: where it starts and ends."""
         return self.along(axis).bounds_at(position)
 
-    def slice_at(self, position: int, *, axis: int | None = None) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
+    def slice_at(
+        self, position: int, *, axis: int | None = None
+    ) -> tuple[npt.NDArray[Any], npt.NDArray[Any]]:
         """The raveled positions and values of one slice along ``axis``."""
         return self.along(axis).slice_at(position)
 
@@ -685,19 +765,27 @@ class SparseStore:
         """One slice as one coordinate array per uncompressed axis, plus the values."""
         return self.along(axis).coords_at(position)
 
-    def slices_at(self, positions: Sequence[int] | npt.NDArray[Any], *, axis: int | None = None) -> Selection:
+    def slices_at(
+        self, positions: Sequence[int] | npt.NDArray[Any], *, axis: int | None = None
+    ) -> Selection:
         """Many slices along ``axis``, in two waves rather than two per slice."""
         return self.along(axis).slices_at(positions)
 
-    def slices_over(self, start: int, stop: int, *, axis: int | None = None) -> Selection:
+    def slices_over(
+        self, start: int, stop: int, *, axis: int | None = None
+    ) -> Selection:
         """The slices at positions ``[start:stop)`` along ``axis`` -- one contiguous run, one read."""
         return self.along(axis).slices_over(start, stop)
 
-    def dense_slices(self, positions: Sequence[int] | npt.NDArray[Any], *, axis: int | None = None) -> npt.NDArray[Any]:
+    def dense_slices(
+        self, positions: Sequence[int] | npt.NDArray[Any], *, axis: int | None = None
+    ) -> npt.NDArray[Any]:
         """A batch of slices along ``axis``, dense over the uncompressed axes."""
         return self.along(axis).dense_slices(positions)
 
-    def dense_slice(self, position: int, *, axis: int | None = None) -> npt.NDArray[Any]:
+    def dense_slice(
+        self, position: int, *, axis: int | None = None
+    ) -> npt.NDArray[Any]:
         """One slice scattered into a dense array over the uncompressed axes."""
         return self.along(axis).dense_slice(position)
 
@@ -721,9 +809,16 @@ class SparseStore:
         asked. It also fetches everything, which is the opposite of what a reader is for; it is here
         for a round trip and for re-writing a store with another layout added, not for a read path.
         """
-        return SparseArray({axis: SparseReader(self.path, axis).to_layout() for axis in self.indexed_axes})
+        return SparseArray(
+            {
+                axis: SparseReader(self.path, axis).to_layout()
+                for axis in self.indexed_axes
+            }
+        )
 
-    def add_axis(self, axis: int, *, chunk: int | None = None, byte_addressable: bool = False) -> SparseStore:
+    def add_axis(
+        self, axis: int, *, chunk: int | None = None, byte_addressable: bool = False
+    ) -> SparseStore:
         """Write one more layout into this store, leaving the ones already there alone.
 
         Adding a third way to read a store used to mean :meth:`to_array` -- which fetches *every*
@@ -745,14 +840,18 @@ class SparseStore:
         if axis in self.info.layouts:
             return self
         if not 0 <= axis < self.rank:
-            raise LayoutError(f"axis {axis} is not an axis of shape {self.shape}, so nothing could compress along it")
+            raise LayoutError(
+                f"axis {axis} is not an axis of shape {self.shape}, so nothing could compress along it"
+            )
 
         held = self.along(next(iter(self.indexed_axes))).to_layout()
         coords, values = SparseArray({held.indexed_axis: held}).to_coords()
         built = _compress(self.shape, coords, values, axis, "refuse")
 
         root: ZarrNode = zarr.open_group(str(self.path), mode="r+")
-        write_layout_into(root[LAYOUTS_GROUP], built, chunk=chunk, byte_addressable=byte_addressable)
+        write_layout_into(
+            root[LAYOUTS_GROUP], built, chunk=chunk, byte_addressable=byte_addressable
+        )
         layouts = {info.indexed_axis: info for info in self.info.layouts.values()}
         root.attrs[BLOCK_KEY] = block_for(self.shape, {**layouts, axis: built})
 

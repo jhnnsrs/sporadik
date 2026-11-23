@@ -68,7 +68,11 @@ def chunk_for(dtype: MatrixLike, nnz: int | None = None) -> int:
 
 
 def write_layout_into(
-    parent: MatrixLike, layout: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+    parent: MatrixLike,
+    layout: MatrixLike,
+    *,
+    chunk: int | None = None,
+    byte_addressable: bool = False,
 ) -> MatrixLike:
     """One layout, as a child group of ``parent``, and nothing else -- no block.
 
@@ -101,7 +105,11 @@ def write_layout_into(
         # 152 KB one over 19 059 features and a ~22 MB transfer for the 5.4 M-bin one, where two
         # entries would pull the entire object; chunked, they cost one 128 KB GET that then
         # serves the next 32 768 consecutive positions.
-        size = len(array) if byte_addressable else (chunk or chunk_for(array.dtype, len(array)))
+        size = (
+            len(array)
+            if byte_addressable
+            else (chunk or chunk_for(array.dtype, len(array)))
+        )
         child.create_array(
             name,
             shape=array.shape,
@@ -113,17 +121,28 @@ def write_layout_into(
 
 
 def write_store(
-    path: Path | str, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+    path: Path | str,
+    matrices: MatrixLike,
+    *,
+    chunk: int | None = None,
+    byte_addressable: bool = False,
 ) -> Path:
     """Write an array's layouts as a sparse store at ``path``."""
     write_store_into(
-        zarr.open_group(str(Path(path)), mode="w"), matrices, chunk=chunk, byte_addressable=byte_addressable
+        zarr.open_group(str(Path(path)), mode="w"),
+        matrices,
+        chunk=chunk,
+        byte_addressable=byte_addressable,
     )
     return Path(path)
 
 
 def write_store_into(
-    group: MatrixLike, matrices: MatrixLike, *, chunk: int | None = None, byte_addressable: bool = False
+    group: MatrixLike,
+    matrices: MatrixLike,
+    *,
+    chunk: int | None = None,
+    byte_addressable: bool = False,
 ) -> MatrixLike:
     """Write the layouts into an already-opened zarr group, and return it.
 
@@ -151,7 +170,9 @@ def write_store_into(
     shape = next(iter(layouts.values())).shape
     parent = group.create_group(LAYOUTS_GROUP)
     for _, layout in sorted(layouts.items()):
-        write_layout_into(parent, layout, chunk=chunk, byte_addressable=byte_addressable)
+        write_layout_into(
+            parent, layout, chunk=chunk, byte_addressable=byte_addressable
+        )
 
     group.attrs[BLOCK_KEY] = block_for(shape, layouts)
     return group

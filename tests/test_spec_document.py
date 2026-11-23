@@ -24,10 +24,16 @@ MARKER = "<!-- spec-block:"
 
 def _documented_block() -> dict:
     """The example block out of `README.md`, found by its marker rather than by line number."""
-    assert README.exists(), f"{README} is this package's specification; the suite asserts against it"
+    assert README.exists(), (
+        f"{README} is this package's specification; the suite asserts against it"
+    )
     text = README.read_text()
-    assert MARKER in text, f"{README} has lost the marker that anchors its example block"
-    return json.loads(text.split(MARKER, 1)[1].split("```json", 1)[1].split("```", 1)[0])
+    assert MARKER in text, (
+        f"{README} has lost the marker that anchors its example block"
+    )
+    return json.loads(
+        text.split(MARKER, 1)[1].split("```json", 1)[1].split("```", 1)[0]
+    )
 
 
 def test_the_documented_block_has_the_keys_the_code_writes():
@@ -55,7 +61,9 @@ def test_the_documented_block_has_the_keys_the_code_writes():
     assert sorted(documented) == sorted(written), "the block's keys, as documented"
     assert documented["spec"] == written["spec"] == sporadik.SPEC_VERSION
     assert documented["complete"] is written["complete"] is True
-    assert documented["layouts"] == written["layouts"], "paths, axes and ravel orders, as documented"
+    assert documented["layouts"] == written["layouts"], (
+        "paths, axes and ravel orders, as documented"
+    )
 
 
 def test_the_documented_paths_follow_the_rule_the_document_states():
@@ -65,26 +73,37 @@ def test_the_documented_paths_follow_the_rule_the_document_states():
     for entry in documented["layouts"]:
         assert entry["path"] == sporadik.layout_path(entry["indexed_axis"])
         others = [axis for axis in range(rank) if axis != entry["indexed_axis"]]
-        assert sorted(entry["index_order"]) == others, "index_order is the axes it did not compress"
+        assert sorted(entry["index_order"]) == others, (
+            "index_order is the axes it did not compress"
+        )
 
 
 def test_a_store_written_here_reads_back_through_the_documented_block(tmp_path):
     """Not just shaped right -- what the writer actually lands matches the document, key for key."""
-    matrix = sp.random(400, 90, density=0.05, format="csc", dtype=np.float32, random_state=0)
+    matrix = sp.random(
+        400, 90, density=0.05, format="csc", dtype=np.float32, random_state=0
+    )
     store = sporadik.write_store(tmp_path / "s.zarr", [matrix, matrix.tocsr()])
-    landed = json.loads((store / "zarr.json").read_text())["attributes"][sporadik.BLOCK_KEY]
+    landed = json.loads((store / "zarr.json").read_text())["attributes"][
+        sporadik.BLOCK_KEY
+    ]
 
     documented = _documented_block()
     assert sorted(landed) == sorted(documented)
     assert landed["spec"] == documented["spec"]
-    assert [entry["path"] for entry in landed["layouts"]] == [entry["path"] for entry in documented["layouts"]]
+    assert [entry["path"] for entry in landed["layouts"]] == [
+        entry["path"] for entry in documented["layouts"]
+    ]
 
 
-@pytest.mark.parametrize("claim", [
-    "len(indptr) == shape[indexed_axis] + 1",
-    "layouts/axis{indexed_axis}",
-    '"sporadik"',
-])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "len(indptr) == shape[indexed_axis] + 1",
+        "layouts/axis{indexed_axis}",
+        '"sporadik"',
+    ],
+)
 def test_the_document_states_the_load_bearing_claims(claim):
     """The three sentences a second implementer cannot get right by guessing.
 

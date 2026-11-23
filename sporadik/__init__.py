@@ -74,7 +74,13 @@ an outage rather than a refusal.
 
 from importlib.metadata import PackageNotFoundError, version
 
-from sporadik.api import Duplicates, SparseArray, SparseStore, as_sparse_array, open_array
+from sporadik.api import (
+    Duplicates,
+    SparseArray,
+    SparseStore,
+    as_sparse_array,
+    open_array,
+)
 from sporadik.errors import IncompleteError, LayoutError, SpecError, SporadikError
 from sporadik.layout import (
     Layout,
@@ -121,7 +127,9 @@ try:
     #: what `pyproject.toml` says and semantic-release bumps. **Not the spec version**: see
     #: `RELEASING.md` -- `SPEC_VERSION` says how the bytes are read and moves on its own.
     __version__ = version("sporadik")
-except PackageNotFoundError:  # pragma: no cover - a source tree that was never installed
+except (
+    PackageNotFoundError
+):  # pragma: no cover - a source tree that was never installed
     __version__ = "0.0.0.dev0"
 
 # Dropped rather than left reachable: they are `importlib`'s names, not this package's, and

@@ -26,9 +26,23 @@ import numpy as np
 import numpy.typing as npt
 
 from sporadik.errors import LayoutError
-from sporadik.spec import ENCODINGS, MIN_RANK, anndata_encoding, layout_path, raveled_shape
+from sporadik.spec import (
+    ENCODINGS,
+    MIN_RANK,
+    anndata_encoding,
+    layout_path,
+    raveled_shape,
+)
 
-__all__ = ["Layout", "MatrixLike", "layout_of", "layout_over", "layouts_of", "maxima_of", "validate_layout"]
+__all__ = [
+    "Layout",
+    "MatrixLike",
+    "layout_of",
+    "layout_over",
+    "layouts_of",
+    "maxima_of",
+    "validate_layout",
+]
 
 #: Anything three arrays and a shape can be read out of: a `scipy.sparse` CSR or CSC matrix, or a
 #: :class:`Layout` built from the arrays directly. Duck-typed, so `scipy` need not be importable.
@@ -137,9 +151,13 @@ def validate_layout(
     """
     shape = tuple(int(size) for size in shape)
     if len(shape) < MIN_RANK:
-        raise LayoutError(f"a sparse array has at least {MIN_RANK} axes, but shape is {shape}")
+        raise LayoutError(
+            f"a sparse array has at least {MIN_RANK} axes, but shape is {shape}"
+        )
     if not 0 <= indexed_axis < len(shape):
-        raise LayoutError(f"axis {indexed_axis} is not an axis of shape {shape}, so nothing could compress along it")
+        raise LayoutError(
+            f"axis {indexed_axis} is not an axis of shape {shape}, so nothing could compress along it"
+        )
     expected = shape[indexed_axis] + 1
     if len(indptr) != expected:
         raise LayoutError(
@@ -147,7 +165,9 @@ def validate_layout(
             f"(one per slice, plus the end), but it has {len(indptr)}."
         )
     if len(data) != len(indices):
-        raise LayoutError(f"`data` has {len(data)} entries and `indices` {len(indices)}; they are parallel")
+        raise LayoutError(
+            f"`data` has {len(data)} entries and `indices` {len(indices)}; they are parallel"
+        )
 
 
 def layout_over(
@@ -167,7 +187,9 @@ def layout_over(
     """
     shape = tuple(int(size) for size in shape)
     others = tuple(axis for axis in range(len(shape)) if axis != indexed_axis)
-    order = tuple(int(axis) for axis in index_order) if index_order is not None else others
+    order = (
+        tuple(int(axis) for axis in index_order) if index_order is not None else others
+    )
     if sorted(order) != sorted(others):
         raise LayoutError(
             f"`index_order` must be the axes other than {indexed_axis}, in the order `indices` was raveled over -- "
@@ -210,7 +232,9 @@ def layout_of(matrix: MatrixLike) -> Layout:
             f"A {fmt!r} matrix has no anndata spelling this writes. Convert it with .tocsr() or .tocsc() first, "
             "choosing by which axis a reader will select along."
         )
-    return layout_over(shape, ENCODINGS[encoding], data=data, indices=indices, indptr=indptr)
+    return layout_over(
+        shape, ENCODINGS[encoding], data=data, indices=indices, indptr=indptr
+    )
 
 
 def layouts_of(matrices: MatrixLike) -> dict[int, Layout]:
@@ -231,12 +255,16 @@ def layouts_of(matrices: MatrixLike) -> dict[int, Layout]:
     # `Mapping`, not `dict`: a holder that protects its own invariants hands back a read-only view
     # rather than the mutable original, and a check against `dict` would refuse exactly the objects
     # that are most careful about what they hold.
-    if isinstance(held, Mapping) and all(isinstance(layout, Layout) for layout in held.values()):
+    if isinstance(held, Mapping) and all(
+        isinstance(layout, Layout) for layout in held.values()
+    ):
         candidates = list(held.values())
     else:
         candidates = matrices if isinstance(matrices, (list, tuple)) else [matrices]
     if not candidates:
-        raise LayoutError("A sparse store is its layouts; there is no state in which one exists and holds none.")
+        raise LayoutError(
+            "A sparse store is its layouts; there is no state in which one exists and holds none."
+        )
 
     layouts: dict[int, Layout] = {}
     for candidate in candidates:

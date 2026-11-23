@@ -22,51 +22,11 @@ scipy = ["scipy>=1.11"]
 obstore = ["obstore>=0.10"]
 complete = ["scipy>=1.11", "obstore>=0.10"]
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.3.5",
-    "pytest-cov>=6.1.1",
-    "ruff>0.11",
-    "basedpyright>=1.21",
-    "python-semantic-release>=9.21.0",
-    "scipy>=1.11",
-    # The interop claim is a test, not a memory: the suite asserts that at rank two a layout is
-    # read back by anndata itself, identically. Without this it would be an assertion about
-    # anndata that nothing ever ran.
-    "anndata>=0.10",
-]
-
 [tool.hatch.build.targets.sdist]
 include = ["sporadik"]
 
 [tool.hatch.build.targets.wheel]
 include = ["sporadik"]
-
-[tool.basedpyright]
-include = ["sporadik"]
-exclude = ["**/__pycache__", "tests"]
-typeCheckingMode = "strict"
-# zarr's group and array types differ across its 3.x line and the values that come back through
-# them are Unknown whatever sporadik annotates, so these four would report zarr's silence at every
-# call site here. Every other strict rule stays on.
-reportUnknownMemberType = false
-reportUnknownArgumentType = false
-reportUnknownVariableType = false
-reportUnknownParameterType = false
-reportMissingTypeStubs = false
-
-[tool.ruff.lint]
-extend-select = ["ANN", "D1", "E501", "UP"]
-extend-ignore = ["UP037", "UP038", "UP042"]
-
-[tool.ruff.lint.per-file-ignores]
-# A test's name and docstring say what it asserts; a `-> None` on every one of them is noise that
-# makes the suite harder to read, which is the opposite of what the rule is for.
-"tests/*" = ["ANN001", "ANN201", "ANN202", "ANN206", "ANN401"]
-
-[tool.ruff]
-exclude = [".git", ".ruff_cache", ".venv", "__pypackages__", "_build", "build", "dist"]
-line-length = 120
 
 [tool.semantic_release]
 # No version_toml/version_variables: the release version lives only in the git
@@ -127,3 +87,14 @@ fallback-version = "0.0.0"
 # doctest in the tree can join the run and fail it for reasons the package does not own.
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.1",
+    "ruff==0.17.6",
+    "basedpyright==1.40.2",
+    "python-semantic-release>=9.21.0",
+    "scipy>=1.11",
+    "anndata>=0.10",
+]

@@ -23,7 +23,11 @@ def test_everything_promised_is_actually_there():
 
 def test_nothing_public_is_left_out_of_the_promise():
     """Nothing reachable at the root is left undocumented and accidentally supported."""
-    public = {name for name in dir(sporadik) if not name.startswith("_") and name not in _SUBMODULES}
+    public = {
+        name
+        for name in dir(sporadik)
+        if not name.startswith("_") and name not in _SUBMODULES
+    }
     assert not public - set(sporadik.__all__)
 
 
@@ -40,13 +44,21 @@ def test_every_submodule_name_is_promised_at_the_root():
     unpromised: dict[str, list[str]] = {}
     for name in sorted(_SUBMODULES):
         module = importlib.import_module(f"sporadik.{name}")
-        missing = [entry for entry in getattr(module, "__all__", ()) if entry not in sporadik.__all__]
+        missing = [
+            entry
+            for entry in getattr(module, "__all__", ())
+            if entry not in sporadik.__all__
+        ]
         if missing:
             unpromised[name] = missing
-    assert not unpromised, f"public in a submodule but not promised at the root: {unpromised}"
+    assert not unpromised, (
+        f"public in a submodule but not promised at the root: {unpromised}"
+    )
 
 
 def test_the_promise_lists_each_name_once():
     """A name twice is a merge that went wrong, and `__all__` is where it would show."""
-    duplicated = sorted({name for name in sporadik.__all__ if sporadik.__all__.count(name) > 1})
+    duplicated = sorted(
+        {name for name in sporadik.__all__ if sporadik.__all__.count(name) > 1}
+    )
     assert not duplicated, f"listed more than once: {duplicated}"
